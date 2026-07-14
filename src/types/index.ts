@@ -4,7 +4,7 @@
  */
 
 /**
- * Represents a raw crawled web page before chunking.
+ * Represents a raw crawled web page containing the original HTML content.
  */
 export interface WebPage {
   /** Source URL of the page */
@@ -13,11 +13,25 @@ export interface WebPage {
   /** Title of the web page */
   title: string;
   
-  /** Complete raw textual content of the page */
-  content: string;
-  
-  /** Date and time when the page was crawled */
-  crawledAt: Date;
+  /** Complete raw HTML content of the page */
+  html: string;
+}
+
+/**
+ * Configuration options for the Website Crawler.
+ */
+export interface CrawlerConfig {
+  /** Maximum number of pages to crawl overall. Helps prevent infinite loops on large sites. */
+  maxPages?: number;
+
+  /** Maximum depth of the crawl relative to the starting URL (0-indexed). */
+  maxDepth?: number;
+
+  /** Delay in milliseconds between subsequent HTTP requests to prevent rate-limiting/DOS. */
+  requestDelay?: number;
+
+  /** Custom User-Agent string to pass in request headers. Used also for robots.txt checking. */
+  userAgent?: string;
 }
 
 /**

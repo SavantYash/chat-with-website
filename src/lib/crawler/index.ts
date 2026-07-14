@@ -2,8 +2,8 @@ import { WebPage } from "../../types";
 
 /**
  * Interface defining the Web Crawler component.
- * Responsible for downloading pages of a site and extracting raw text content.
- * Follows the Single Responsibility Principle.
+ * Responsible for crawling pages of a site and extracting raw HTML content.
+ * Follows the Dependency Inversion Principle.
  */
 export interface Crawler {
   /**
@@ -15,3 +15,8 @@ export interface Crawler {
    */
   crawl(baseUrl: string, maxPages?: number): Promise<WebPage[]>;
 }
+
+export * from "./crawler";
+export * from "./normalizer";
+export * from "./parser";
+export * from "./robots";
