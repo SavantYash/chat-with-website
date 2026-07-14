@@ -14,7 +14,7 @@ This repository implements a clean architecture adhering strictly to SOLID princ
 - [x] ✅ Content Extractor (Mozilla Readability, Cheerio fallback)
 - [x] ✅ Document Chunker (Semantic boundary splits)
 - [x] ✅ Embedding Service
-- [ ] ⬜ Indexing Pipeline
+- [x] ✅ Indexing Pipeline
 - [ ] ⬜ Retrieval Service
 - [ ] ⬜ Prompt Builder
 - [ ] ⬜ Chat API
@@ -280,3 +280,71 @@ The Google Gen AI SDK (`@google/genai`) was selected as the modern, unified SDK.
 
 ### Future Improvements
 - Implement local caching or hashing strategies to bypass redundant API calls on repeated chunks.
+
+---
+
+## Indexing Pipeline
+
+### Responsibility
+Orchestrates the complete indexing workflow from website URL to vector database storage. It coordinates the crawling, HTML cleaning, semantic boundary snapping, batch vector embedding generation, and LanceDB writing.
+
+### Input
+- Starting entrypoint URL string (e.g., `https://example.com`)
+- Configuration: `IndexingConfig` (including limits, overrides, clearing options, callbacks, and abort signals).
+
+### Output
+- `IndexingSummary` containing:
+  - `pagesVisited`: Discovered count.
+  - `pagesIndexed`: Successfully parsed and written count.
+  - `skippedPages`: Skips/failures count.
+  - `chunksCreated`: Total segments split.
+  - `chunksStored`: Total chunks written.
+  - Diagnostics breakdowns: `crawlDuration`, `extractionDuration`, `chunkingDuration`, `embeddingDuration`, `storageDuration`, and `totalDuration`.
+  - Detailed `pages` results with success/failure status and stage metadata.
+
+### Pipeline Position
+```text
+Website URL
+    ↓
+Crawler
+    ↓
+Content Extractor
+    ↓
+Document Chunker
+    ↓
+Embedding Service
+    ↓
+[Indexing Pipeline (Orchestrator)]
+    ↓
+Vector Store (LanceDB)
+```
+
+### Design Decisions
+- **Loose Coupling via Dependency Injection**: Accepts instances in the constructor to keep the system testable and decouple business boundaries.
+- **Configurable Override Factory**: Runs local chunkers if dimensions/overlaps are customized at runtime.
+- **Progress Callback Event Stream**: Fires real-time events (`initialize`, `crawl`, `extract`, `chunk`, `embed`, `store`, `complete`, `cancel`) to let parent APIs render status messages.
+- **Graceful Error Ingestion**: Catch individual page exceptions to prevent the indexing thread from failing completely.
+- **Memory-Optimized Bulk Operations**: Groups chunk lists across successful pages, queries embeddings in optimal batch sizes, and executes database inserts sequentially.
+- **Idempotency Check (`clearExisting`)**: Resets/clears vector tables before index tasks if requested.
+- **AbortSignal Monitoring**: Periodically checks `signal.aborted` status at loop entry points to stop execution immediately on cancellation.
+
+### Why This Approach?
+A centralized orchestrator keeps modular subsystems focused on single responsibilities. Injecting services ensures we can mock Google Gen AI or JSDOM boundaries, while granular timing diagnostics allow developers to identify bottleneck thresholds.
+
+### Dependencies
+No extra dependencies are introduced; it coordinates existing modules.
+
+### Edge Cases Considered
+- **Crawl Parameter Mapping**: Maps overrides safely to prevent `[object Object]` type mismatches.
+- **Batch Embedding Failures (Partial Success)**: If a batch fails during vector generation or database writing, the pipeline marks only those pages as failed, counts stored vectors correctly, and continues with remaining batches.
+- **Immediate Cancellation**: Terminates early and reports a `cancel` stage status if `signal.aborted` is caught at loop starts.
+
+### Performance Considerations
+- Sequential batch iteration avoids HTTP 429 rate limit locks.
+- Aggregated database insertions reduce directory file-lock times.
+
+### Testing
+- Verified via `src/lib/rag/test-indexing.ts` crawling example.com and MDN JavaScript guides, verifying abort timeouts, and running a successful search on LanceDB showing matched metadata.
+
+### Future Improvements
+- Implement parallel batch embedding generation using `p-limit` to increase throughput.

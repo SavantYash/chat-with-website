@@ -154,3 +154,80 @@ export interface EmbeddedDocumentChunk extends DocumentChunk {
   embedding: number[];
 }
 
+/**
+ * Result of indexing an individual webpage.
+ */
+export interface PageIndexingResult {
+  /** The URL of the page */
+  url: string;
+  /** Whether the page was successfully processed and indexed */
+  success: boolean;
+  /** The stage where processing failed, if applicable */
+  stage?: "crawl" | "extract" | "chunk" | "embed" | "store";
+  /** Number of chunks created from this page */
+  chunks: number;
+  /** Failure details if processing failed */
+  failureReason?: string;
+}
+
+/**
+ * Summary details of a full website indexing pipeline execution.
+ */
+export interface IndexingSummary {
+  /** Total number of unique pages discovered/visited by the crawler */
+  pagesVisited: number;
+  /** Total number of pages successfully parsed, chunked, and embedded */
+  pagesIndexed: number;
+  /** Pages skipped due to content length limits or parsing exceptions */
+  skippedPages: number;
+  /** Total number of document chunks created */
+  chunksCreated: number;
+  /** Total number of document chunks successfully stored in the vector database */
+  chunksStored: number;
+  /** Duration of crawling stage in milliseconds */
+  crawlDuration: number;
+  /** Duration of extraction stage in milliseconds */
+  extractionDuration: number;
+  /** Duration of chunking stage in milliseconds */
+  chunkingDuration: number;
+  /** Duration of embedding stage in milliseconds */
+  embeddingDuration: number;
+  /** Duration of storage stage in milliseconds */
+  storageDuration: number;
+  /** Pipeline total duration in milliseconds */
+  totalDuration: number;
+  /** Individual page status records */
+  pages: PageIndexingResult[];
+}
+
+/**
+ * Event broadcasted via onProgress callback.
+ */
+export interface IndexingProgressEvent {
+  stage: "initialize" | "crawl" | "extract" | "chunk" | "embed" | "store" | "complete" | "cancel";
+  message: string;
+  details?: Record<string, unknown>;
+}
+
+/**
+ * Runtime config options for triggering the indexing pipeline.
+ */
+export interface IndexingConfig {
+  /** Limit on crawled pages count */
+  maxPages?: number;
+  /** Limit on BFS depth level */
+  maxDepth?: number;
+  /** Chunker token character limit overrides */
+  chunkSize?: number;
+  /** Chunker overlap size overrides */
+  chunkOverlap?: number;
+  /** Bulk embedding provider batch size overrides */
+  embeddingBatchSize?: number;
+  /** Clear vector database before indexing */
+  clearExisting?: boolean;
+  /** Callback for progress events */
+  onProgress?: (event: IndexingProgressEvent) => void;
+  /** Signal for abortion */
+  signal?: AbortSignal;
+}
+
