@@ -12,6 +12,9 @@ interface LanceDBRow {
   title: string;
   content: string;
   chunkIndex: number;
+  totalChunks: number;
+  startOffset: number;
+  endOffset: number;
   vector: Float32Array | number[];
   _distance?: number;
 }
@@ -85,6 +88,9 @@ export class LanceDBStore implements VectorStore {
           new Field("title", new Utf8()),
           new Field("content", new Utf8()),
           new Field("chunkIndex", new Int32()),
+          new Field("totalChunks", new Int32()),
+          new Field("startOffset", new Int32()),
+          new Field("endOffset", new Int32()),
           new Field(
             "vector",
             new FixedSizeList(
@@ -134,6 +140,9 @@ export class LanceDBStore implements VectorStore {
         title: doc.title,
         content: doc.content,
         chunkIndex: doc.chunkIndex,
+        totalChunks: doc.totalChunks,
+        startOffset: doc.startOffset,
+        endOffset: doc.endOffset,
         vector: doc.embedding,
       }));
 
@@ -184,6 +193,9 @@ export class LanceDBStore implements VectorStore {
         title: row.title,
         content: row.content,
         chunkIndex: row.chunkIndex,
+        totalChunks: row.totalChunks,
+        startOffset: row.startOffset,
+        endOffset: row.endOffset,
         // Convert Float32Array back to standard JS array of numbers
         embedding: Array.from(row.vector),
         // LanceDB returns L2/cosine distance as _distance; assign to optional score

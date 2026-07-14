@@ -67,9 +67,25 @@ export interface DocumentChunk {
   chunkIndex: number;
 
   /**
-   * The high-dimensional dense vector representing the semantic content of the chunk.
+   * The total number of chunks generated for the source document.
    */
-  embedding: number[];
+  totalChunks: number;
+
+  /**
+   * The character index where this chunk starts in the clean source content.
+   */
+  startOffset: number;
+
+  /**
+   * The character index where this chunk ends in the clean source content.
+   */
+  endOffset: number;
+
+  /**
+   * The high-dimensional dense vector representing the semantic content of the chunk.
+   * Optional because chunking occurs prior to embedding generation.
+   */
+  embedding?: number[];
 
   /**
    * Optional similarity score (e.g., L2 distance, cosine similarity)

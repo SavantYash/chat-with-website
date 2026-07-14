@@ -1,36 +1,231 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Chat with a Website - RAG Backend Architecture
 
-## Getting Started
+A high-performance, modular Retrieval-Augmented Generation (RAG) backend engine built with **Next.js (App Router)**, **TypeScript**, **Node.js**, **LanceDB**, and **Apache Arrow**.
 
-First, run the development server:
+This repository implements a clean architecture adhering strictly to SOLID principles, dependency injection, and separation of concerns.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+---
+
+## Project Status Checklist
+
+- [x] ✅ Architecture (VectorStore & Service contracts defined)
+- [x] ✅ Vector Store (LanceDB implementation)
+- [x] ✅ Website Crawler (BFS, robots.txt, domain constraint)
+- [x] ✅ Content Extractor (Mozilla Readability, Cheerio fallback)
+- [x] ✅ Document Chunker (Semantic boundary splits)
+- [ ] ⬜ Embedding Service
+- [ ] ⬜ Indexing Pipeline
+- [ ] ⬜ Retrieval Service
+- [ ] ⬜ Prompt Builder
+- [ ] ⬜ Chat API
+- [ ] ⬜ Frontend
+- [ ] ⬜ Deployment
+
+---
+
+## Vector Store (LanceDB)
+
+### Responsibility
+Encapsulates all database-specific vector search operations, schema validations, persistence, and semantic searches. It isolates the rest of the application from database details.
+
+### Input
+- Insertions: `DocumentChunk[]` (contains content text, offsets, and high-dimensional vector embeddings).
+- Queries: `queryEmbedding: number[]` (semantic query vector) and `limit: number` (K results).
+- Options: `Record<string, unknown>` (supporting SQL metadata filtering).
+
+### Output
+- Similarity Search: `Promise<DocumentChunk[]>` populated with metadata and similarity distance `score`.
+
+### Pipeline Position
+```text
+Document Chunker
+      ↓
+Embedding Service
+      ↓
+[Vector Store (LanceDB)]
+      ↓
+Retrieval Service
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Design Decisions
+- **Decoupled Configuration**: Exposes database path, table names, and vector dimensions via constructors to allow swapping or configuring embedding sizes.
+- **Arrow Schema Verification**: Formulates an explicit Apache Arrow Schema (`Schema`, `Field`, `FixedSizeList`, `Float32`, `Int32`, `Utf8`) to ensure native columnar search performance.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Why This Approach?
+Rather than using key-value JSON stores, LanceDB utilizes a native vector format on disk via Arrow. Hardcoding schemas was avoided to allow extending the store to other providers with varying vector dimensions.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### Dependencies
+- `@lancedb/lancedb`: Official Node.js bindings.
+- `apache-arrow`: Used to construct and enforce strict type schemas.
 
-## Learn More
+### Edge Cases Considered
+- **Table Exists Check**: Uses `connection.tableNames()` instead of try-catch flow controls to decide between `openTable()` and `createEmptyTable()`.
+- **Zero Document Insertion**: Returns immediately if input lists are empty to avoid database block crashes.
+- **Clear Store**: Drops tables completely and re-runs `initialize()` to reclaim disk sectors and reset indexes.
 
-To learn more about Next.js, take a look at the following resources:
+### Performance Considerations
+- Columnar disk reads are optimized by Arrow.
+- Inserting arrays of objects is bulk-buffered to avoid multiple file locks.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Testing
+- Checked using `src/lib/db/test-lancedb.ts` (inserts dummy 3D vectors, queries top matches close to query, asserts ranking, clears tables).
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Future Improvements
+- Add native scalar index creation (e.g. on URL or title) to accelerate metadata filtering.
 
-## Deploy on Vercel
+---
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Website Crawler
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### Responsibility
+Explores and indexes a target website recursively via a Breadth-First Search (BFS) queue. It enforces robots.txt rules, same-domain constraints, and request delay intervals.
+
+### Input
+- Start URL string (e.g. `https://example.com`).
+- Configuration: `maxPages`, `maxDepth`, `requestDelay`, and `userAgent`.
+
+### Output
+- `Promise<WebPage[]>` where each page holds its origin `url`, HTML `<title>`, and raw `html` content.
+
+### Pipeline Position
+```text
+Website URL
+      ↓
+[Website Crawler]
+      ↓
+Content Extractor
+```
+
+### Design Decisions
+- **Collaborator Split**: Divided into single-responsibility classes:
+  - `UrlNormalizer`: Cleans URLs and verifies domain bounds.
+  - `HtmlParser`: Scrapes anchor tags.
+  - `RobotsChecker`: Resolves and checks robots.txt files.
+  - `WebsiteCrawler`: Runs the BFS queue.
+- **Dependency Inversion**: Accepts components in the constructor (dependency injection) for test mocking.
+
+### Why This Approach?
+Splitting the logic prevents a single monolithic service that would be hard to maintain, debug, or mock. BFS is preferred over DFS for crawling to index pages closer to the root domain first.
+
+### Dependencies
+- `cheerio`: Fast DOM parsing.
+- `robots-parser`: Robust robots.txt obedience checker.
+
+### Edge Cases Considered
+- **Blocked Crawling**: Skip paths matching disallow statements.
+- **Protocol Filtering**: Discards `mailto:`, `javascript:`, or `ftp:` links.
+- **Different Host**: Skip relative and absolute links pointing off-site.
+
+### Performance Considerations
+- Uses a `requestDelay` sleep block between requests to prevent triggering DDoS rate limiters.
+- Maintains a memory set of visited links to prevent duplicate requests.
+
+### Testing
+- Verified using `src/lib/crawler/test-crawler.ts` crawling `https://example.com` under strict domain locks and delay intervals.
+
+### Future Improvements
+- Implement parallel crawling with limits (e.g., using `p-limit`) while respecting host restrictions.
+
+---
+
+## Content Extractor
+
+### Responsibility
+Converts messy, raw HTML pages into boilerplate-free, clean semantic content optimized for LLM readability.
+
+### Input
+- `WebPage` (origin url, raw html, scraped title).
+
+### Output
+- `ProcessedPage` (url, title, cleaned semantic content).
+
+### Pipeline Position
+```text
+Website Crawler
+      ↓
+[Content Extractor]
+      ↓
+Document Chunker
+```
+
+### Design Decisions
+- **Hybrid Extraction**: Tries Mozilla Readability on JSDOM first. Falls back to Cheerio stripping if Readability fails.
+- **Structural Preservation**: Traverses elements recursively to convert tags into a clean layout:
+  - Heading tags (`h1`-`h6`) $\rightarrow$ Markdown headings.
+  - Bullet item tags (`li`) $\rightarrow$ Asterisk lists.
+  - Code/pre tags $\rightarrow$ Markdown code blocks (backticks).
+
+### Why This Approach?
+Plain text extraction merges page content into a single block. Retaining headings, lists, and code blocks preserves semantic relationships, improving LLM generation quality.
+
+### Dependencies
+- `@mozilla/readability`: Main content extractor.
+- `jsdom`: Simulated DOM implementation.
+- `cheerio`: Fallback DOM queries.
+- `domhandler`: Provides `AnyNode` type declarations for safe traversal.
+
+### Edge Cases Considered
+- **No Content Check**: Skips pages yielding less than 100 characters of clean content.
+- **Nested Code**: Prevents duplicate markdown backticks on `<pre><code>` structures.
+- **Missing Title**: Falls back to crawled metadata or placeholder strings.
+
+### Performance Considerations
+- Fallback parsing defaults to Cheerio which has low resource overhead.
+- Collapses duplicate whitespaces and limits consecutive empty lines to a maximum of 2.
+
+### Testing
+- Verified using `src/lib/rag/test-extractor.ts` against `https://example.com` and `https://developer.mozilla.org/en-US/docs/Web/JavaScript` verifying markdown structure extraction.
+
+### Future Improvements
+- Support table layout extraction into standard Markdown table notation.
+
+---
+
+## Document Chunker
+
+### Responsibility
+Segments long clean content texts into small, overlapping semantic chunks that fit within model embedding token windows.
+
+### Input
+- `ProcessedPage` (url, title, cleaned semantic content).
+- Configuration: `chunkSize` (max chunk length) and `chunkOverlap` (overlap size).
+
+### Output
+- `DocumentChunk[]` containing sequence indexes, offset bounds, and identifiers.
+
+### Pipeline Position
+```text
+Content Extractor
+      ↓
+[Document Chunker]
+      ↓
+Embedding Service
+```
+
+### Design Decisions
+- **Semantic Split Window**: Walks content using a sliding window. In the overlap boundary, it searches backwards for:
+  - Paragraph endings (`\n\n` or `\n`).
+  - Sentence punctuation (`. `, `? `, `! `).
+  - Word space separations (` `).
+- **Metadata Bundling**: Calculates offsets and total chunk counts in a single pass.
+
+### Why This Approach?
+Character splitters cut words or sentences in half, causing loss of context. By prioritizing paragraph and sentence splits, chunks maintain logical readability.
+
+### Dependencies
+- `uuid`: Generates globally unique identifiers for chunks.
+
+### Edge Cases Considered
+- **Infinite Loop Guard**: If no boundaries are detected in the overlap window, the splitter forces the cursor forward to prevent stalls.
+- **Length Mismatch**: Returns empty lists if document text is empty.
+- **Overlap Ceiling**: Validates that overlap is strictly smaller than chunk size.
+
+### Performance Considerations
+- Operates in-memory with $O(n)$ time complexity relative to page length.
+- Attaches offsets and total chunk counts during partition to avoid secondary scans.
+
+### Testing
+- Tested using `src/lib/rag/test-chunker.ts` against MDN JavaScript content, verifying overlapping regions and boundary splits.
+
+### Future Improvements
+- Implement token-length splitting (using TikToken or similar) to match model limit boundaries.

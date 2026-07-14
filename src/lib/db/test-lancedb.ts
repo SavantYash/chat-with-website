@@ -32,6 +32,9 @@ async function runTest() {
         title: "LanceDB Documentation",
         content: "LanceDB is a serverless vector database designed for AI applications. It stores high-dimensional embeddings locally.",
         chunkIndex: 0,
+        totalChunks: 1,
+        startOffset: 0,
+        endOffset: 113,
         embedding: [0.1, 0.2, 0.3], // High semantic match for first query
       },
       {
@@ -40,6 +43,9 @@ async function runTest() {
         title: "Next.js App Router Documentation",
         content: "Next.js App Router is a modern framework for React applications, featuring layout-first routing and Server Components.",
         chunkIndex: 0,
+        totalChunks: 1,
+        startOffset: 0,
+        endOffset: 111,
         embedding: [0.9, 0.8, 0.7],
       },
       {
@@ -48,6 +54,9 @@ async function runTest() {
         title: "Gemini AI Models",
         content: "Gemini is Google's most capable multimodal model, built from the ground up to operate across text, code, images, and audio.",
         chunkIndex: 0,
+        totalChunks: 1,
+        startOffset: 0,
+        endOffset: 120,
         embedding: [0.5, 0.5, 0.5],
       },
     ];
@@ -70,7 +79,7 @@ async function runTest() {
       console.log(`     Title: ${chunk.title}`);
       console.log(`     URL: ${chunk.url}`);
       console.log(`     Content: "${chunk.content}"`);
-      console.log(`     Vector: [${chunk.embedding.join(", ")}]`);
+      console.log(`     Vector: [${(chunk.embedding || []).join(", ")}]`);
       console.log(`     Distance Score: ${chunk.score}`);
     });
 

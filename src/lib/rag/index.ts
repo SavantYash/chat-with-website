@@ -15,3 +15,4 @@ export interface DocumentChunker {
 }
 
 export * from "./html-extractor";
+export * from "./chunker";
