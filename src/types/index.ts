@@ -146,3 +146,11 @@ export interface ProcessedPage {
   content: string;
 }
 
+/**
+ * Represents a document chunk that has a generated embedding vector.
+ * Extends DocumentChunk to guarantee that the embedding property is defined.
+ */
+export interface EmbeddedDocumentChunk extends DocumentChunk {
+  embedding: number[];
+}
+

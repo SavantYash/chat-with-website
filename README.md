@@ -13,7 +13,7 @@ This repository implements a clean architecture adhering strictly to SOLID princ
 - [x] ✅ Website Crawler (BFS, robots.txt, domain constraint)
 - [x] ✅ Content Extractor (Mozilla Readability, Cheerio fallback)
 - [x] ✅ Document Chunker (Semantic boundary splits)
-- [ ] ⬜ Embedding Service
+- [x] ✅ Embedding Service
 - [ ] ⬜ Indexing Pipeline
 - [ ] ⬜ Retrieval Service
 - [ ] ⬜ Prompt Builder
@@ -229,3 +229,54 @@ Character splitters cut words or sentences in half, causing loss of context. By 
 
 ### Future Improvements
 - Implement token-length splitting (using TikToken or similar) to match model limit boundaries.
+
+---
+
+## Embedding Service
+
+### Responsibility
+Generates high-dimensional dense vector representations of textual inputs using Google's Gemini API. It handles batch slicing, vector normalization, and exponential backoff retry policies for robust integration.
+
+### Input
+- Single: `embed(text: string)`
+- Array: `embedBatch(texts: string[])`
+
+### Output
+- Single: `Promise<number[]>` representing a unit-length normalized float vector (default size 768).
+- Array: `Promise<number[][]>` representing mapped list of normalized float vectors.
+
+### Pipeline Position
+```text
+Document Chunker
+      ↓
+[Embedding Service]
+      ↓
+Vector Store (LanceDB)
+```
+
+### Design Decisions
+- **Interface Decoupling**: Defined `EmbeddingProvider` interface to separate RAG orchestration logic from model providers.
+- **Dimensionality Scaling**: Configures output dimensionality to 768 to match search indexing budgets.
+- **Euclidean L2 Normalization**: Automatically normalizes vectors so their Euclidean distance equals 1. This converts expensive cosine similarity calculations into simple dot product equations.
+- **Sequential Batches**: Sequences batch queries to guarantee rate limits are respected.
+
+### Why This Approach?
+The Google Gen AI SDK (`@google/genai`) was selected as the modern, unified SDK. Since `text-embedding-004` is discontinued in Gemini's developer API, we use the recommended `gemini-embedding-2` model configured with a 768 dimension limit.
+
+### Dependencies
+- `@google/genai`: Official Google generative AI client library.
+
+### Edge Cases Considered
+- **Network Fluctuation**: Retries only retryable HTTP errors (429, 500, 502, 503, 504) with backoffs.
+- **Null/Blank Text**: Returns zero-vector pads if text content is blank.
+- **Batch Slice Representation**: Maps string list arrays into structured `Content` objects with part blocks to prevent the API from combining multiple items.
+
+### Performance Considerations
+- Sequential batch iteration reduces rate-limit exhaustion.
+- L2-normalized unit vectors allow LanceDB to skip calculation overheads during index retrieval.
+
+### Testing
+- Tested using `src/lib/llm/test-embedding.ts` verifying semantic cosine similarity thresholds and duplicate matching (similarity = 1.00000).
+
+### Future Improvements
+- Implement local caching or hashing strategies to bypass redundant API calls on repeated chunks.

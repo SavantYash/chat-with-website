@@ -35,3 +35,6 @@ export interface LLMService {
    */
   generateResponse(prompt: string, context: string): Promise<string>;
 }
+
+export * from "./embedding-provider";
+export * from "./gemini-embedding";

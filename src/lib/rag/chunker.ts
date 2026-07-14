@@ -74,8 +74,18 @@ export class DocumentChunker {
         });
       }
 
-      // Safeguard against infinite loops: next start must advance
-      const nextStart = end - this.chunkOverlap;
+      // Calculate overlapping start for the next chunk
+      let nextStart = end - this.chunkOverlap;
+
+      // Quality improvement: backtrack to the nearest space to ensure the next chunk starts on a word boundary
+      if (nextStart > start && nextStart < content.length) {
+        const lastSpace = content.lastIndexOf(" ", nextStart);
+        if (lastSpace !== -1 && lastSpace > start) {
+          nextStart = lastSpace + 1; // Start immediately after the space
+        }
+      }
+
+      // Safeguard against infinite loops: next start must strictly advance
       if (nextStart > start) {
         start = nextStart;
       } else {
