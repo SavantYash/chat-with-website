@@ -1,0 +1,102 @@
+/**
+ * Domain types and abstractions for the Chat with a Website RAG application.
+ * Follows SOLID design principles by separating interfaces (contracts) from implementations.
+ */
+
+/**
+ * Represents a raw crawled web page before chunking.
+ */
+export interface WebPage {
+  /** Source URL of the page */
+  url: string;
+  
+  /** Title of the web page */
+  title: string;
+  
+  /** Complete raw textual content of the page */
+  content: string;
+  
+  /** Date and time when the page was crawled */
+  crawledAt: Date;
+}
+
+/**
+ * Represents a semantic chunk of a crawled web page.
+ * This is the core model stored in the vector database and retrieved during chat queries.
+ */
+export interface DocumentChunk {
+  /**
+   * Unique identifier for the chunk.
+   * Typically a UUID or a content-hash.
+   */
+  id: string;
+
+  /**
+   * The source URL of the web page from which this chunk was extracted.
+   */
+  url: string;
+
+  /**
+   * The title of the source web page.
+   */
+  title: string;
+
+  /**
+   * The raw textual content of the chunk.
+   */
+  content: string;
+
+  /**
+   * The zero-based index of this chunk within the original document.
+   * Useful for reconstructing adjacent context (e.g. sliding window).
+   */
+  chunkIndex: number;
+
+  /**
+   * The high-dimensional dense vector representing the semantic content of the chunk.
+   */
+  embedding: number[];
+
+  /**
+   * Optional similarity score (e.g., L2 distance, cosine similarity)
+   * populated only when returned from a search query.
+   */
+  score?: number;
+}
+
+/**
+ * Interface defining the operations for a vector database.
+ * This acts as the boundary abstraction (Dependency Inversion Principle),
+ * preventing the application core from being tightly coupled to a specific database implementation.
+ */
+export interface VectorStore {
+  /**
+   * Initializes the database connection, ensures schema definitions, and establishes initial connections.
+   */
+  initialize(): Promise<void>;
+
+  /**
+   * Inserts or updates an array of document chunks in the database.
+   * @param documents Array of chunks to index.
+   */
+  addDocuments(documents: DocumentChunk[]): Promise<void>;
+
+  /**
+   * Performs a similarity search based on the provided query vector.
+   * Returns the top-k most similar document chunks, including their similarity scores.
+   * 
+   * @param queryEmbedding The semantic vector embedding of the user's query.
+   * @param limit The maximum number of results to return (k).
+   * @param options Optional database-specific overrides or filtering parameters.
+   */
+  similaritySearch(
+    queryEmbedding: number[],
+    limit: number,
+    options?: Record<string, unknown>
+  ): Promise<DocumentChunk[]>;
+
+  /**
+   * Resets the store by clearing all documents or dropping the active tables.
+   */
+  clear(): Promise<void>;
+}
