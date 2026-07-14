@@ -114,3 +114,19 @@ export interface VectorStore {
    */
   clear(): Promise<void>;
 }
+
+/**
+ * Represents a processed, cleaned web page ready for chunking and embedding.
+ * Boilerplates like navigation, scripts, footer, and styling are stripped.
+ */
+export interface ProcessedPage {
+  /** The source URL of the page */
+  url: string;
+  
+  /** The title of the page */
+  title: string;
+  
+  /** Clean, semantic, markdown-like textual content of the page */
+  content: string;
+}
+

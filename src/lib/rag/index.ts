@@ -13,3 +13,5 @@ export interface DocumentChunker {
    */
   chunk(page: WebPage): DocumentChunk[];
 }
+
+export * from "./html-extractor";
