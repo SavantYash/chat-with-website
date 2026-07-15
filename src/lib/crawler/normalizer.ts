@@ -36,14 +36,60 @@ export class UrlNormalizer {
   /**
    * Resolves a relative or absolute link against a base URL, validates it, and normalizes it.
    * 
+   * Directory Inference Heuristic:
+   * When resolving relative links, standard URL resolution treats the last segment as a file
+   * if the base URL does not end with a trailing slash. However, for crawlers indexing static websites,
+   * if a base URL pathname lacks a file extension, it is highly likely to represent a directory
+   * (e.g., /Dhyat_html should resolve relative links inside it, rather than at the root).
+   * Therefore, we infer if the base URL represents a directory using a heuristic (no trailing dot extension),
+   * and if so, we append a trailing slash before resolution.
+   * 
    * @param link The relative or absolute link found in anchor tags.
    * @param baseUrl The base URL of the page where the link was found.
    * @returns The resolved, normalized URL, or null if the link is invalid or has an unsupported protocol.
    */
   resolveAndNormalize(link: string, baseUrl: string): string | null {
     try {
+      const trimmed = link.trim();
+
+      // Filter out empty links, fragments, javascript links, and templating placeholder errors (like ".html")
+      if (
+        !trimmed ||
+        trimmed === "#" ||
+        trimmed.startsWith("#") ||
+        trimmed.startsWith("javascript:") ||
+        /^\.[a-zA-Z0-9]{1,5}$/.test(trimmed)
+      ) {
+        return null;
+      }
+
+      let base = baseUrl;
+      try {
+        const parsedBase = new URL(baseUrl);
+        const pathname = parsedBase.pathname;
+        if (!pathname.endsWith("/")) {
+          const lastSegment = pathname.substring(pathname.lastIndexOf("/") + 1);
+          // Directory inference heuristic: if the last segment does not end with a standard file extension,
+          // we treat the base URL as representing a directory and append a trailing slash.
+          const hasExtension = /\.[a-zA-Z0-9]+$/.test(lastSegment);
+          if (!hasExtension) {
+            parsedBase.pathname = pathname + "/";
+            base = parsedBase.toString();
+          }
+        }
+      } catch {
+        // Fall back to original baseUrl if parsing fails
+      }
+
       // Resolve relative link against base URL
-      const resolved = new URL(link, baseUrl);
+      const resolved = new URL(trimmed, base);
+
+      // Filter out URLs where the final path segment is just a file extension (e.g., "/.html")
+      const resolvedPath = resolved.pathname;
+      const lastResolvedSegment = resolvedPath.substring(resolvedPath.lastIndexOf("/") + 1);
+      if (/^\.[a-zA-Z0-9]{1,5}$/.test(lastResolvedSegment)) {
+        return null;
+      }
 
       if (!this.isValidProtocol(resolved.href)) {
         return null;
