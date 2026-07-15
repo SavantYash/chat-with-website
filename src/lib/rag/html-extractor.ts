@@ -41,25 +41,29 @@ export class HtmlExtractor {
     let extractedTitle = rawTitle;
 
     // Step 1: Use JSDOM and Mozilla Readability to isolate main article content
-    try {
-      const dom = new JSDOM(html, { url });
-      const doc = dom.window.document;
+    // Bypass Readability for about/team pages where grid widgets are aggressively stripped
+    const isAboutPage = url.toLowerCase().includes("about") || url.toLowerCase().includes("team");
+    if (!isAboutPage) {
+      try {
+        const dom = new JSDOM(html, { url });
+        const doc = dom.window.document;
 
-      const reader = new Readability(doc);
-      const article = reader.parse();
+        const reader = new Readability(doc);
+        const article = reader.parse();
 
-      if (article && article.content) {
-        extractedHtml = article.content;
-        if (article.title) {
-          extractedTitle = article.title;
+        if (article && article.content) {
+          extractedHtml = article.content;
+          if (article.title) {
+            extractedTitle = article.title;
+          }
         }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.warn(`[HtmlExtractor] Readability parse failed for ${url}: ${errorMessage}. Falling back to Cheerio.`);
       }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      console.warn(`[HtmlExtractor] Readability parse failed for ${url}: ${errorMessage}. Falling back to Cheerio.`);
     }
 
-    // Step 2: Fallback to complete page HTML if Readability failed
+    // Step 2: Fallback to complete page HTML if Readability failed or was bypassed
     if (!extractedHtml) {
       extractedHtml = html;
     }
