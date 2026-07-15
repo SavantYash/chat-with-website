@@ -38,3 +38,5 @@ export interface LLMService {
 
 export * from "./embedding-provider";
 export * from "./gemini-embedding";
+export * from "./chat-provider";
+export * from "./gemini-chat";
