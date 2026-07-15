@@ -1,40 +1,83 @@
 import { NextResponse } from "next/server";
+import { createIndexingPipeline } from "@/lib/chat";
 
 /**
  * POST /api/index
  * 
- * Why this endpoint exists:
- * It serves as the HTTP entrypoint to index a target website. When called,
- * it triggers the crawling of the site, splits pages into chunks, computes 
- * embeddings, and inserts them into the LanceDB vector store.
+ * Handles HTTP requests to index a target website. Instantiates dependencies
+ * via the factory, runs the crawler, extracts page text, divides text into chunks,
+ * generates embeddings using Gemini, and stores vectors in LanceDB.
  */
 export async function POST(request: Request) {
-  try {
-    const body = await request.json();
-    const { url, maxPages } = body as { url?: string; maxPages?: number };
+  const requestStartTime = performance.now();
+  console.log(`[API /api/index] Received POST request.`);
 
-    if (!url) {
+  try {
+    // 1. JSON parse safety check
+    let body;
+    try {
+      body = await request.json();
+    } catch (parseError) {
+      console.warn(`[API /api/index] ❌ Failed to parse JSON request body.`);
       return NextResponse.json(
-        { error: "Missing required query parameter: 'url'" },
+        { error: "Invalid JSON format in request body." },
         { status: 400 }
       );
     }
 
-    // TODO: Connect and trigger the Crawler, Chunker, Embedding, and LanceDBStore pipeline.
-    
+    const { url, maxPages } = body as { url?: string; maxPages?: number };
+
+    // 2. Validations
+    if (!url || typeof url !== "string" || !url.trim()) {
+      console.warn(`[API /api/index] ❌ Validation failed: 'url' is missing or blank.`);
+      return NextResponse.json(
+        { error: "Missing or invalid required body parameter: 'url'" },
+        { status: 400 }
+      );
+    }
+
+    const limitPages = maxPages !== undefined ? Number(maxPages) : 10;
+    if (isNaN(limitPages) || limitPages <= 0) {
+      console.warn(`[API /api/index] ❌ Validation failed: 'maxPages' must be a positive number.`);
+      return NextResponse.json(
+        { error: "Invalid parameter: 'maxPages' must be a positive number." },
+        { status: 400 }
+      );
+    }
+
+    // 3. Resolve dependencies using the factory
+    console.log(`[API /api/index] Instantiating dependencies via IndexingPipeline factory...`);
+    const pipeline = await createIndexingPipeline();
+
+    // 4. Run crawling, chunking, and embedding generation
+    console.log(`[API /api/index] Starting indexing run for startUrl: "${url}" (maxPages: ${limitPages})...`);
+    const summary = await pipeline.run(url.trim(), {
+      maxPages: limitPages,
+      maxDepth: 3,
+      clearExisting: true, // Resets database tables for a clean crawl
+    });
+
+    const elapsed = performance.now() - requestStartTime;
+    console.log(`[API /api/index] Completed successfully in ${elapsed.toFixed(1)}ms. Total pages: ${summary.pagesIndexed}, chunks: ${summary.chunksStored}.`);
+
+    // 5. Render telemetry response JSON
     return NextResponse.json({
       success: true,
-      message: `Successfully accepted crawling and indexing job for: ${url}`,
+      message: `Successfully crawled and indexed: ${url}`,
       meta: {
         url,
-        maxPages: maxPages || 10,
-        status: "placeholder_architecture_only"
+        maxPages: limitPages,
+        totalPages: summary.pagesIndexed,
+        totalChunks: summary.chunksStored,
+        durationMs: elapsed
       }
     });
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
+
+  } catch (error: any) {
+    const elapsed = performance.now() - requestStartTime;
+    console.error(`[API /api/index] ❌ Indexing failure after ${elapsed.toFixed(1)}ms: ${error.message}`);
     return NextResponse.json(
-      { error: `Internal indexing error: ${errorMessage}` },
+      { error: `Internal indexing error: ${error.message}` },
       { status: 500 }
     );
   }

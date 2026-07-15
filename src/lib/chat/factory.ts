@@ -4,6 +4,10 @@ import { PromptBuilder } from "./prompt-builder";
 import { GeminiChatProvider } from "../llm/gemini-chat";
 import { GeminiEmbeddingProvider } from "../llm/gemini-embedding";
 import { LanceDBStore } from "../db/lancedb-store";
+import { IndexingPipeline } from "../rag/indexing-pipeline";
+import { WebsiteCrawler } from "../crawler/crawler";
+import { HtmlExtractor } from "../rag/html-extractor";
+import { DocumentChunker } from "../rag/chunker";
 
 /**
  * Creates and initializes a ChatService instance by resolving all DI dependencies.
@@ -46,4 +50,43 @@ export async function createChatService(): Promise<ChatService> {
   });
 
   return new ChatService(retriever, promptBuilder, chatProvider);
+}
+
+/**
+ * Creates and initializes an IndexingPipeline instance by resolving all DI dependencies.
+ * Reuses the same database configuration as the chat service to ensure consistency.
+ * 
+ * @returns A promise resolving to the initialized IndexingPipeline.
+ */
+export async function createIndexingPipeline(): Promise<IndexingPipeline> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      "[IndexingPipelineFactory] GEMINI_API_KEY environment variable is not defined."
+    );
+  }
+
+  const crawler = new WebsiteCrawler();
+  const extractor = new HtmlExtractor();
+  const chunker = new DocumentChunker({ chunkSize: 800, chunkOverlap: 150 });
+  const embeddingProvider = new GeminiEmbeddingProvider({
+    apiKey,
+    normalizeVectors: true,
+  });
+
+  const vectorStore = new LanceDBStore({
+    dbUri: "./data/lancedb",
+    tableName: "web_chunks",
+    embeddingDimension: 768,
+  });
+
+  await vectorStore.initialize();
+
+  return new IndexingPipeline(
+    crawler,
+    extractor,
+    chunker,
+    embeddingProvider,
+    vectorStore
+  );
 }
