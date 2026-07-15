@@ -151,7 +151,7 @@ export default function Home() {
           {/* Indexing Section (Left Column) */}
           <section className="md:col-span-1 flex flex-col gap-6">
             <div className="border border-zinc-200 rounded-xl bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900 shadow-sm">
-              <h2 className="text-lg font-semibold mb-4 text-zinc-800 dark:text-zinc-150 border-b border-zinc-100 pb-2 dark:border-zinc-800">
+              <h2 className="text-lg font-semibold mb-4 text-zinc-800 dark:text-zinc-200 border-b border-zinc-100 pb-2 dark:border-zinc-800">
                 Website Indexing
               </h2>
               <form onSubmit={handleIndex} className="flex flex-col gap-4">
@@ -198,7 +198,7 @@ export default function Home() {
 
               {/* Indexing Feedback Messages */}
               {indexingStatus && (
-                <div className="mt-4 p-3 rounded-lg bg-indigo-50 text-indigo-700 text-xs border border-indigo-150 dark:bg-indigo-950/30 dark:text-indigo-400 dark:border-indigo-900/50">
+                <div className="mt-4 p-3 rounded-lg bg-indigo-50 text-indigo-700 text-xs border border-indigo-200 dark:bg-indigo-950/30 dark:text-indigo-400 dark:border-indigo-900/50">
                   <div className="flex items-center gap-2">
                     <span className="h-2 w-2 rounded-full bg-indigo-500 animate-ping"></span>
                     <span>{indexingStatus}</span>
@@ -207,13 +207,13 @@ export default function Home() {
               )}
 
               {indexingSuccess === true && !isIndexing && (
-                <div className="mt-4 p-3 rounded-lg bg-green-50 text-green-700 text-xs border border-green-150 dark:bg-green-950/30 dark:text-green-400 dark:border-green-900/50">
+                <div className="mt-4 p-3 rounded-lg bg-green-50 text-green-700 text-xs border border-green-200 dark:bg-green-950/30 dark:text-green-400 dark:border-green-900/50">
                   ✅ Crawl & indexing pipeline executed successfully. Context ready.
                 </div>
               )}
 
               {indexingError && (
-                <div className="mt-4 p-3 rounded-lg bg-red-50 text-red-700 text-xs border border-red-150 dark:bg-red-950/30 dark:text-red-400 dark:border-red-900/50">
+                <div className="mt-4 p-3 rounded-lg bg-red-50 text-red-700 text-xs border border-red-200 dark:bg-red-950/30 dark:text-red-400 dark:border-red-900/50">
                   ❌ Indexing Error: {indexingError}
                 </div>
               )}
@@ -222,7 +222,7 @@ export default function Home() {
 
           {/* Chat Section (Right Column) */}
           <section className="md:col-span-2 flex flex-col h-[700px] border border-zinc-200 rounded-xl bg-white dark:border-zinc-800 dark:bg-zinc-900 shadow-sm overflow-hidden">
-            <h2 className="text-lg font-semibold px-6 py-4 border-b border-zinc-150 dark:border-zinc-800 text-zinc-800 dark:text-zinc-150">
+            <h2 className="text-lg font-semibold px-6 py-4 border-b border-zinc-200 dark:border-zinc-800 text-zinc-800 dark:text-zinc-200">
               Query Assistant
             </h2>
 
@@ -244,7 +244,7 @@ export default function Home() {
                       className={`rounded-2xl px-4 py-2.5 text-sm ${
                         message.sender === "user"
                           ? "bg-indigo-600 text-white rounded-br-none dark:bg-indigo-500"
-                          : "bg-zinc-100 text-zinc-800 rounded-bl-none dark:bg-zinc-800 dark:text-zinc-150"
+                          : "bg-zinc-100 text-zinc-800 rounded-bl-none dark:bg-zinc-800 dark:text-zinc-200"
                       }`}
                     >
                       {message.text}
@@ -262,7 +262,7 @@ export default function Home() {
                             href={source.url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 rounded-md bg-zinc-100 border border-zinc-250 px-2 py-0.5 text-xs text-indigo-600 hover:bg-zinc-200 transition-colors dark:bg-zinc-800 dark:border-zinc-700 dark:text-indigo-400 dark:hover:bg-zinc-700"
+                            className="inline-flex items-center gap-1 rounded-md bg-zinc-100 border border-zinc-300 px-2 py-0.5 text-xs text-indigo-600 hover:bg-zinc-200 transition-colors dark:bg-zinc-800 dark:border-zinc-700 dark:text-indigo-400 dark:hover:bg-zinc-700"
                           >
                             <span>[{source.chunkNumber ?? idx + 1}]</span>
                             <span className="max-w-[120px] truncate">{source.title || "Source"}</span>
@@ -291,7 +291,7 @@ export default function Home() {
             </div>
 
             {/* Chat Input panel */}
-            <div className="border-t border-zinc-150 p-4 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50">
+            <div className="border-t border-zinc-200 p-4 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50">
               <form onSubmit={handleChat} className="flex gap-3">
                 <input
                   type="text"
