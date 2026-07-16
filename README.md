@@ -1,350 +1,266 @@
-# Chat with a Website - RAG Backend Architecture
+# RAG Website Assistant
 
-A high-performance, modular Retrieval-Augmented Generation (RAG) backend engine built with **Next.js (App Router)**, **TypeScript**, **Node.js**, **LanceDB**, and **Apache Arrow**.
+A production-grade, highly modular Retrieval-Augmented Generation (RAG) system built with **Next.js (App Router)**, **TypeScript**, **LanceDB**, and **Google Gemini AI**. 
 
-This repository implements a clean architecture adhering strictly to SOLID principles, dependency injection, and separation of concerns.
-
----
-
-## Project Status Checklist
-
-- [x] ✅ Architecture (VectorStore & Service contracts defined)
-- [x] ✅ Vector Store (LanceDB implementation)
-- [x] ✅ Website Crawler (BFS, robots.txt, domain constraint)
-- [x] ✅ Content Extractor (Mozilla Readability, Cheerio fallback)
-- [x] ✅ Document Chunker (Semantic boundary splits)
-- [x] ✅ Embedding Service
-- [x] ✅ Indexing Pipeline
-- [ ] ⬜ Retrieval Service
-- [ ] ⬜ Prompt Builder
-- [ ] ⬜ Chat API
-- [ ] ⬜ Frontend
-- [ ] ⬜ Deployment
+The system recursively crawls target websites (obeying `robots.txt` and rate limits), extracts clean readable markdown-like structures, segments contents using overlapping semantic snapping boundaries, embeds chunk payloads, and stores vectors locally. A grounded chat interface queries the vector space to generate natural language answers with source-backed citations.
 
 ---
 
-## Vector Store (LanceDB)
+## 🏗️ Architecture & Component Flows
 
-### Responsibility
-Encapsulates all database-specific vector search operations, schema validations, persistence, and semantic searches. It isolates the rest of the application from database details.
+The project is structured around a decoupled **Clean Architecture**, relying on strict **Dependency Injection (DI)** and abstractions. 
 
-### Input
-- Insertions: `DocumentChunk[]` (contains content text, offsets, and high-dimensional vector embeddings).
-- Queries: `queryEmbedding: number[]` (semantic query vector) and `limit: number` (K results).
-- Options: `Record<string, unknown>` (supporting SQL metadata filtering).
-
-### Output
-- Similarity Search: `Promise<DocumentChunk[]>` populated with metadata and similarity distance `score`.
-
-### Pipeline Position
-```text
-Document Chunker
-      ↓
-Embedding Service
-      ↓
-[Vector Store (LanceDB)]
-      ↓
-Retrieval Service
+### 1. Ingest & Indexing Pipeline Flow
+This pipeline crawls a target domain, processes its HTML contents, and indexes the resulting chunks into the vector store.
+```mermaid
+graph TD
+    Start[Target URL] --> Crawler[Website Crawler]
+    Crawler --> Extractor[HTML Extractor]
+    Extractor --> Chunker[Document Chunker]
+    Chunker --> Embedder[Embedding Provider]
+    Embedder --> Store[Vector Store]
+    
+    style Crawler fill:#f9f,stroke:#333,stroke-width:2px
+    style Extractor fill:#bbf,stroke:#333,stroke-width:2px
+    style Chunker fill:#dfd,stroke:#333,stroke-width:2px
+    style Embedder fill:#fdd,stroke:#333,stroke-width:2px
+    style Store fill:#ffb,stroke:#333,stroke-width:2px
 ```
 
-### Design Decisions
-- **Decoupled Configuration**: Exposes database path, table names, and vector dimensions via constructors to allow swapping or configuring embedding sizes.
-- **Arrow Schema Verification**: Formulates an explicit Apache Arrow Schema (`Schema`, `Field`, `FixedSizeList`, `Float32`, `Int32`, `Utf8`) to ensure native columnar search performance.
-
-### Why This Approach?
-Rather than using key-value JSON stores, LanceDB utilizes a native vector format on disk via Arrow. Hardcoding schemas was avoided to allow extending the store to other providers with varying vector dimensions.
-
-### Dependencies
-- `@lancedb/lancedb`: Official Node.js bindings.
-- `apache-arrow`: Used to construct and enforce strict type schemas.
-
-### Edge Cases Considered
-- **Table Exists Check**: Uses `connection.tableNames()` instead of try-catch flow controls to decide between `openTable()` and `createEmptyTable()`.
-- **Zero Document Insertion**: Returns immediately if input lists are empty to avoid database block crashes.
-- **Clear Store**: Drops tables completely and re-runs `initialize()` to reclaim disk sectors and reset indexes.
-
-### Performance Considerations
-- Columnar disk reads are optimized by Arrow.
-- Inserting arrays of objects is bulk-buffered to avoid multiple file locks.
-
-### Testing
-- Checked using `src/lib/db/test-lancedb.ts` (inserts dummy 3D vectors, queries top matches close to query, asserts ranking, clears tables).
-
-### Future Improvements
-- Add native scalar index creation (e.g. on URL or title) to accelerate metadata filtering.
+*   **Website Crawler** (`src/lib/crawler`): Performs domain-constrained, depth-limited Breadth-First Search (BFS) page scraping. OBEYS `robots.txt` rules and applies configured request delays to prevent rate blocking.
+*   **HTML Extractor** (`src/lib/rag/html-extractor`): Employs Mozilla Readability on a simulated JSDOM (with Cheerio as a fallback) to strip scripts, styles, and headers, returning semantic Markdown structures (lists, headings, code blocks).
+*   **Document Chunker** (`src/lib/rag/chunker`): Segments page markdown content into overlapping text blocks. Snaps window breaks to paragraphs, sentences, or word boundaries to preserve linguistic context.
+*   **Embedding Provider** (`src/lib/llm/gemini-embedding`): Batches strings, communicates with the Gemini Embedding API, handles unit L2 normalization, and propagates retry information.
+*   **Vector Store** (`src/lib/db/lancedb-store`): Receives embedded document chunks and persists them in LanceDB utilizing Apache Arrow formats. Supports vector similarity lookups and SQL-like metadata filtering.
 
 ---
 
-## Website Crawler
-
-### Responsibility
-Explores and indexes a target website recursively via a Breadth-First Search (BFS) queue. It enforces robots.txt rules, same-domain constraints, and request delay intervals.
-
-### Input
-- Start URL string (e.g. `https://example.com`).
-- Configuration: `maxPages`, `maxDepth`, `requestDelay`, and `userAgent`.
-
-### Output
-- `Promise<WebPage[]>` where each page holds its origin `url`, HTML `<title>`, and raw `html` content.
-
-### Pipeline Position
-```text
-Website URL
-      ↓
-[Website Crawler]
-      ↓
-Content Extractor
+### 2. Retrieval & Chat Query Flow
+This pipeline retrieves relevant document chunks from the vector store to ground the LLM's natural language response.
+```mermaid
+graph TD
+    UserQuery[User Query] --> UI[Next.js App UI]
+    UI --> API[API Route /api/chat]
+    API --> ChatService[ChatService]
+    ChatService --> Retriever[Retriever]
+    Retriever --> Embedder[Embedding Provider]
+    Embedder --> Store[Vector Store]
+    Store --> |Nearest Chunks| Retriever
+    Retriever --> |Context List| ChatService
+    ChatService --> PromptBuilder[PromptBuilder]
+    PromptBuilder --> ChatProvider[Gemini Chat Provider]
+    ChatProvider --> |Grounded Response| API
+    API --> |Grounded Answer + Citations| UI
 ```
 
-### Design Decisions
-- **Collaborator Split**: Divided into single-responsibility classes:
-  - `UrlNormalizer`: Cleans URLs and verifies domain bounds.
-  - `HtmlParser`: Scrapes anchor tags.
-  - `RobotsChecker`: Resolves and checks robots.txt files.
-  - `WebsiteCrawler`: Runs the BFS queue.
-- **Dependency Inversion**: Accepts components in the constructor (dependency injection) for test mocking.
-
-### Why This Approach?
-Splitting the logic prevents a single monolithic service that would be hard to maintain, debug, or mock. BFS is preferred over DFS for crawling to index pages closer to the root domain first.
-
-### Dependencies
-- `cheerio`: Fast DOM parsing.
-- `robots-parser`: Robust robots.txt obedience checker.
-
-### Edge Cases Considered
-- **Blocked Crawling**: Skip paths matching disallow statements.
-- **Protocol Filtering**: Discards `mailto:`, `javascript:`, or `ftp:` links.
-- **Different Host**: Skip relative and absolute links pointing off-site.
-
-### Performance Considerations
-- Uses a `requestDelay` sleep block between requests to prevent triggering DDoS rate limiters.
-- Maintains a memory set of visited links to prevent duplicate requests.
-
-### Testing
-- Verified using `src/lib/crawler/test-crawler.ts` crawling `https://example.com` under strict domain locks and delay intervals.
-
-### Future Improvements
-- Implement parallel crawling with limits (e.g., using `p-limit`) while respecting host restrictions.
+*   **ChatService** (`src/lib/chat/chat-service`): Coordinates the query pipeline by fetching context, prompting the model, and structuring output citations.
+*   **Retriever** (`src/lib/chat/retriever`): Requests embeddings for user query strings and runs similarity searches on the vector store to return top matching context blocks.
+*   **PromptBuilder** (`src/lib/chat/prompt-builder`): Assembles system instructions, places cited chunks into contextual templates, and prepares generation prompts.
+*   **Gemini Chat Provider** (`src/lib/llm/gemini-chat`): Calls the Gemini LLM generator to write grounding responses restricted to the retrieved context scope.
 
 ---
 
-## Content Extractor
+## 🛠️ Tech Stack
 
-### Responsibility
-Converts messy, raw HTML pages into boilerplate-free, clean semantic content optimized for LLM readability.
-
-### Input
-- `WebPage` (origin url, raw html, scraped title).
-
-### Output
-- `ProcessedPage` (url, title, cleaned semantic content).
-
-### Pipeline Position
-```text
-Website Crawler
-      ↓
-[Content Extractor]
-      ↓
-Document Chunker
-```
-
-### Design Decisions
-- **Hybrid Extraction**: Tries Mozilla Readability on JSDOM first. Falls back to Cheerio stripping if Readability fails.
-- **Structural Preservation**: Traverses elements recursively to convert tags into a clean layout:
-  - Heading tags (`h1`-`h6`) $\rightarrow$ Markdown headings.
-  - Bullet item tags (`li`) $\rightarrow$ Asterisk lists.
-  - Code/pre tags $\rightarrow$ Markdown code blocks (backticks).
-
-### Why This Approach?
-Plain text extraction merges page content into a single block. Retaining headings, lists, and code blocks preserves semantic relationships, improving LLM generation quality.
-
-### Dependencies
-- `@mozilla/readability`: Main content extractor.
-- `jsdom`: Simulated DOM implementation.
-- `cheerio`: Fallback DOM queries.
-- `domhandler`: Provides `AnyNode` type declarations for safe traversal.
-
-### Edge Cases Considered
-- **No Content Check**: Skips pages yielding less than 100 characters of clean content.
-- **Nested Code**: Prevents duplicate markdown backticks on `<pre><code>` structures.
-- **Missing Title**: Falls back to crawled metadata or placeholder strings.
-
-### Performance Considerations
-- Fallback parsing defaults to Cheerio which has low resource overhead.
-- Collapses duplicate whitespaces and limits consecutive empty lines to a maximum of 2.
-
-### Testing
-- Verified using `src/lib/rag/test-extractor.ts` against `https://example.com` and `https://developer.mozilla.org/en-US/docs/Web/JavaScript` verifying markdown structure extraction.
-
-### Future Improvements
-- Support table layout extraction into standard Markdown table notation.
+*   **Frontend**: React 19 (Client Components), TailwindCSS
+*   **Backend**: Next.js 16 (App Router), Node.js
+*   **LLM Generator**: Gemini 3.1 Flash Lite (`gemini-3.1-flash-lite`)
+*   **Embedding Generator**: Gemini Embedding 2 (`gemini-embedding-2`, 768 Dimensions)
+*   **Vector Database**: LanceDB (Embedded local file database) / Apache Arrow
+*   **Languages**: TypeScript (Strict checks)
+*   **Key Libraries**: Cheerio, jsdom, robots-parser, uuid, @google/genai SDK
 
 ---
 
-## Document Chunker
+## 📂 Project Structure
 
-### Responsibility
-Segments long clean content texts into small, overlapping semantic chunks that fit within model embedding token windows.
-
-### Input
-- `ProcessedPage` (url, title, cleaned semantic content).
-- Configuration: `chunkSize` (max chunk length) and `chunkOverlap` (overlap size).
-
-### Output
-- `DocumentChunk[]` containing sequence indexes, offset bounds, and identifiers.
-
-### Pipeline Position
 ```text
-Content Extractor
-      ↓
-[Document Chunker]
-      ↓
-Embedding Service
+├── src/
+│   ├── app/                      # Next.js UI pages and API endpoints
+│   │   ├── api/
+│   │   │   ├── chat/             # Grounded generation endpoint
+│   │   │   └── index/            # Real-time event streaming indexing endpoint
+│   │   ├── layout.tsx            # Root HTML layout and viewport settings
+│   │   └── page.tsx              # Front-end UI (Crawler logs console & Chat history panels)
+│   ├── lib/                      # Core business and infrastructure packages
+│   │   ├── chat/                 # Grounded chat orchestrators, prompt engines, retrieval
+│   │   ├── crawler/              # BFS website crawlers, normalizers, robots checkers
+│   │   ├── db/                   # LanceDB vector database store and memory-mocks
+│   │   ├── llm/                  # Gemini embedding and chat completions providers
+│   │   └── rag/                  # HTML extractors, sliding-window chunkers, index orchestrators
+│   └── types/                    # Core domain schemas, interfaces, config types
 ```
-
-### Design Decisions
-- **Semantic Split Window**: Walks content using a sliding window. In the overlap boundary, it searches backwards for:
-  - Paragraph endings (`\n\n` or `\n`).
-  - Sentence punctuation (`. `, `? `, `! `).
-  - Word space separations (` `).
-- **Metadata Bundling**: Calculates offsets and total chunk counts in a single pass.
-
-### Why This Approach?
-Character splitters cut words or sentences in half, causing loss of context. By prioritizing paragraph and sentence splits, chunks maintain logical readability.
-
-### Dependencies
-- `uuid`: Generates globally unique identifiers for chunks.
-
-### Edge Cases Considered
-- **Infinite Loop Guard**: If no boundaries are detected in the overlap window, the splitter forces the cursor forward to prevent stalls.
-- **Length Mismatch**: Returns empty lists if document text is empty.
-- **Overlap Ceiling**: Validates that overlap is strictly smaller than chunk size.
-
-### Performance Considerations
-- Operates in-memory with $O(n)$ time complexity relative to page length.
-- Attaches offsets and total chunk counts during partition to avoid secondary scans.
-
-### Testing
-- Tested using `src/lib/rag/test-chunker.ts` against MDN JavaScript content, verifying overlapping regions and boundary splits.
-
-### Future Improvements
-- Implement token-length splitting (using TikToken or similar) to match model limit boundaries.
 
 ---
 
-## Embedding Service
+## ⚡ Environment Variables
 
-### Responsibility
-Generates high-dimensional dense vector representations of textual inputs using Google's Gemini API. It handles batch slicing, vector normalization, and exponential backoff retry policies for robust integration.
+Create a `.env.local` file in the root directory:
 
-### Input
-- Single: `embed(text: string)`
-- Array: `embedBatch(texts: string[])`
+```env
+# Required: API key to access Google Gemini AI services
+GEMINI_API_KEY=your_gemini_api_key_here
 
-### Output
-- Single: `Promise<number[]>` representing a unit-length normalized float vector (default size 768).
-- Array: `Promise<number[][]>` representing mapped list of normalized float vectors.
-
-### Pipeline Position
-```text
-Document Chunker
-      ↓
-[Embedding Service]
-      ↓
-Vector Store (LanceDB)
+# Optional: Override default chat model (defaults to gemini-3.1-flash-lite)
+GEMINI_CHAT_MODEL=gemini-3.1-flash-lite
 ```
-
-### Design Decisions
-- **Interface Decoupling**: Defined `EmbeddingProvider` interface to separate RAG orchestration logic from model providers.
-- **Dimensionality Scaling**: Configures output dimensionality to 768 to match search indexing budgets.
-- **Euclidean L2 Normalization**: Automatically normalizes vectors so their Euclidean distance equals 1. This converts expensive cosine similarity calculations into simple dot product equations.
-- **Sequential Batches**: Sequences batch queries to guarantee rate limits are respected.
-
-### Why This Approach?
-The Google Gen AI SDK (`@google/genai`) was selected as the modern, unified SDK. Since `text-embedding-004` is discontinued in Gemini's developer API, we use the recommended `gemini-embedding-2` model configured with a 768 dimension limit.
-
-### Dependencies
-- `@google/genai`: Official Google generative AI client library.
-
-### Edge Cases Considered
-- **Network Fluctuation**: Retries only retryable HTTP errors (429, 500, 502, 503, 504) with backoffs.
-- **Null/Blank Text**: Returns zero-vector pads if text content is blank.
-- **Batch Slice Representation**: Maps string list arrays into structured `Content` objects with part blocks to prevent the API from combining multiple items.
-
-### Performance Considerations
-- Sequential batch iteration reduces rate-limit exhaustion.
-- L2-normalized unit vectors allow LanceDB to skip calculation overheads during index retrieval.
-
-### Testing
-- Tested using `src/lib/llm/test-embedding.ts` verifying semantic cosine similarity thresholds and duplicate matching (similarity = 1.00000).
-
-### Future Improvements
-- Implement local caching or hashing strategies to bypass redundant API calls on repeated chunks.
 
 ---
 
-## Indexing Pipeline
+## 🚀 Installation & Local Development
 
-### Responsibility
-Orchestrates the complete indexing workflow from website URL to vector database storage. It coordinates the crawling, HTML cleaning, semantic boundary snapping, batch vector embedding generation, and LanceDB writing.
+1.  **Clone the Repository**:
+    ```bash
+    git clone https://github.com/your-username/rag-website-assistant.git
+    cd chat-with-website
+    ```
 
-### Input
-- Starting entrypoint URL string (e.g., `https://example.com`)
-- Configuration: `IndexingConfig` (including limits, overrides, clearing options, callbacks, and abort signals).
+2.  **Install Dependencies**:
+    ```bash
+    npm install
+    ```
 
-### Output
-- `IndexingSummary` containing:
-  - `pagesVisited`: Discovered count.
-  - `pagesIndexed`: Successfully parsed and written count.
-  - `skippedPages`: Skips/failures count.
-  - `chunksCreated`: Total segments split.
-  - `chunksStored`: Total chunks written.
-  - Diagnostics breakdowns: `crawlDuration`, `extractionDuration`, `chunkingDuration`, `embeddingDuration`, `storageDuration`, and `totalDuration`.
-  - Detailed `pages` results with success/failure status and stage metadata.
+3.  **Run Dev Server**:
+    ```bash
+    npm run dev
+    ```
+    Access the UI at `http://localhost:3000`.
 
-### Pipeline Position
-```text
-Website URL
-    ↓
-Crawler
-    ↓
-Content Extractor
-    ↓
-Document Chunker
-    ↓
-Embedding Service
-    ↓
-[Indexing Pipeline (Orchestrator)]
-    ↓
-Vector Store (LanceDB)
-```
+4.  **Build for Production**:
+    ```bash
+    npm run build
+    npm run start
+    ```
 
-### Design Decisions
-- **Loose Coupling via Dependency Injection**: Accepts instances in the constructor to keep the system testable and decouple business boundaries.
-- **Configurable Override Factory**: Runs local chunkers if dimensions/overlaps are customized at runtime.
-- **Progress Callback Event Stream**: Fires real-time events (`initialize`, `crawl`, `extract`, `chunk`, `embed`, `store`, `complete`, `cancel`) to let parent APIs render status messages.
-- **Graceful Error Ingestion**: Catch individual page exceptions to prevent the indexing thread from failing completely.
-- **Memory-Optimized Bulk Operations**: Groups chunk lists across successful pages, queries embeddings in optimal batch sizes, and executes database inserts sequentially.
-- **Idempotency Check (`clearExisting`)**: Resets/clears vector tables before index tasks if requested.
-- **AbortSignal Monitoring**: Periodically checks `signal.aborted` status at loop entry points to stop execution immediately on cancellation.
+---
 
-### Why This Approach?
-A centralized orchestrator keeps modular subsystems focused on single responsibilities. Injecting services ensures we can mock Google Gen AI or JSDOM boundaries, while granular timing diagnostics allow developers to identify bottleneck thresholds.
+## 🔌 API Endpoints
 
-### Dependencies
-No extra dependencies are introduced; it coordinates existing modules.
+### 1. Ingest website (`POST /api/index`)
+Starts the crawler and indexing pipeline, returning a live **Server-Sent Event (SSE)** stream of log updates.
 
-### Edge Cases Considered
-- **Crawl Parameter Mapping**: Maps overrides safely to prevent `[object Object]` type mismatches.
-- **Batch Embedding Failures (Partial Success)**: If a batch fails during vector generation or database writing, the pipeline marks only those pages as failed, counts stored vectors correctly, and continues with remaining batches.
-- **Immediate Cancellation**: Terminates early and reports a `cancel` stage status if `signal.aborted` is caught at loop starts.
+*   **Request URL**: `/api/index`
+*   **Headers**: `Content-Type: application/json`
+*   **Payload JSON**:
+    ```json
+    {
+      "url": "https://example.com",
+      "maxPages": 5
+    }
+    ```
+*   **Response Stream Format**:
+    ```text
+    data: {"type":"progress","stage":"initialize","message":"Clearing existing vectors..."}
 
-### Performance Considerations
-- Sequential batch iteration avoids HTTP 429 rate limit locks.
-- Aggregated database insertions reduce directory file-lock times.
+    data: {"type":"progress","stage":"crawl","message":"Crawling site: https://example.com..."}
 
-### Testing
-- Verified via `src/lib/rag/test-indexing.ts` crawling example.com and MDN JavaScript guides, verifying abort timeouts, and running a successful search on LanceDB showing matched metadata.
+    data: {"type":"complete","message":"Successfully crawled and indexed: https://example.com","meta":{"url":"https://example.com","maxPages":5,"totalPages":1,"totalChunks":3,"durationMs":8250}}
+    ```
 
-### Future Improvements
-- Implement parallel batch embedding generation using `p-limit` to increase throughput.
+---
+
+### 2. Query Grounded Assistant (`POST /api/chat`)
+Queries the vector database for matching chunks and generates a grounded response with source citations.
+
+*   **Request URL**: `/api/chat`
+*   **Headers**: `Content-Type: application/json`
+*   **Payload JSON**:
+    ```json
+    {
+      "message": "What is this domain used for?",
+      "topK": 2,
+      "temperature": 0.2
+    }
+    ```
+*   **Response JSON**:
+    ```json
+    {
+      "answer": "This domain is designated for use in illustrative examples in documents...",
+      "sources": [
+        {
+          "title": "Example Domain",
+          "url": "https://example.com/",
+          "chunkNumber": 1,
+          "totalChunks": 1,
+          "distance": 0.00092
+        }
+      ]
+    }
+    ```
+
+---
+
+## ⚙️ Architecture Decisions
+
+*   **Strict Dependency Injection**: Core services like `IndexingPipeline` and `Retriever` accept abstract interfaces (`VectorStore`, `EmbeddingProvider`, `ChatProvider`) in their constructors rather than instantiating concrete classes directly.
+*   **Composition Root**: Concrete classes are instantiated exclusively in the factory level (`src/lib/chat/factory.ts`), isolating creation details from the rest of the application.
+*   **Unified Delete Abstraction**: Deletes are structured generically via `delete(options: SearchOptions)` using query filters (`MetadataFilter[]`), which are converted to SQL-like filters (`where` clauses) inside the LanceDB store.
+*   **Dynamic Telemetry Logging**: Instead of hardcoding database branding, logging queries resolve names dynamically at runtime using `this.vectorStore.constructor.name`.
+
+---
+
+## ⚠️ Current Limitations
+
+1.  **Rate Limit Thresholds**: The Gemini API has a token/requests per minute quota constraint. Though the backend handles transient 429 errors gracefully using countdown halts and retries, heavy crawls can exhaust quotas quickly.
+2.  **No JavaScript Rendering**: The page crawler downloads raw HTML contents. Websites that render content exclusively using client-side JavaScript (SPAs) will be indexed as blank/empty.
+3.  **Local Database Locking**: LanceDB runs as an embedded library. It performs file writes directly on disk, which means concurrent indexing operations can cause file lock clashes.
+
+---
+
+## 🔮 Future Improvements
+
+*   **Headless Browser integration**: Introduce Playwright or Puppeteer crawlers to support sites requiring client-side JS rendering.
+*   **Database Cloud Adapters**: Implement pgvector (Supabase) or Pinecone adapters to scale indexing throughput beyond local file limitations.
+*   **ParallelBFS Crawler**: Accelerate page parsing using concurrent BFS queues with worker thread configurations.
+*   **Streaming Chat Responses**: Use chunked response transfers for `POST /api/chat` to allow word-by-word streaming in the chat history interface.
+
+---
+
+## 🧪 Testing
+
+Standalone test scripts reside in the codebase to verify components independently:
+
+*   **Mock store unit tests**: Asserts search metrics, capability descriptors, and generic filter deletions.
+    ```bash
+    npx tsx src/lib/db/test-mock-store.ts
+    ```
+*   **LanceDB store integration tests**: Verifies connection initializations and Arrow schemas.
+    ```bash
+    npx tsx src/lib/db/test-lancedb.ts
+    ```
+*   **Rate limit resiliency tests**: Simulates API HTTP 429 blocks to verify countdown queues and retry thresholds.
+    ```bash
+    npx tsx src/lib/rag/test-rate-limit.ts
+    ```
+*   **End-to-end RAG workflow tests**: Runs crawling, HTML sanitization, indexing, database vector seeding, and grounded question answering in a single workflow.
+    ```bash
+    npx tsx src/lib/chat/test-end-to-end.ts
+    ```
+
+---
+
+## 📸 Screenshots
+
+### 🖥️ Home Page & Settings
+<img width="1866" height="971" alt="image" src="https://github.com/user-attachments/assets/2329e88d-88b2-43e7-a3a2-2f0d056cdd19" />
+
+
+
+### 📊 Indexing Progress & Terminal Logs
+<img width="1915" height="1009" alt="image" src="https://github.com/user-attachments/assets/ec04f0c9-945a-4596-a12c-774ad3c5a5da" />
+
+
+### 💬 Chat interface with Grounded Sources
+<img width="1898" height="970" alt="image" src="https://github.com/user-attachments/assets/e7daa39e-2a50-4f7f-9ca1-344bdd3c7ed0" />
+---
+
+## 🎥 Demo Video & Deployment
+
+*   **Live Demo Deployment**: `[Placeholder: Link to live hosted deployment instance]`
+*   **Product Demo Recording**: `[Placeholder: Link to YouTube / Loom video demonstration]`
+
+---
+
+## 📝 License
+
+This project is **Private & Proprietary** and designated for internal review and assessment only.
