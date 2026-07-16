@@ -61,6 +61,7 @@ async function runTest() {
     });
 
     const vectorStore = new MockVectorStore({
+      uri: "mock://",
       namespace: "web_chunks",
       embeddingDimension: 768,
     });
