@@ -268,5 +268,9 @@ export interface IndexingConfig {
   onProgress?: (event: IndexingProgressEvent) => void;
   /** Signal for abortion */
   signal?: AbortSignal;
+  /** Maximum retry attempts for rate limits (HTTP 429) */
+  maxRateLimitRetries?: number;
+  /** Maximum cumulative wait time in seconds for rate limits */
+  maxCumulativeWaitTimeSec?: number;
 }
 

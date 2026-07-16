@@ -211,16 +211,102 @@ export class IndexingPipeline {
       });
 
       const batchTexts = chunkBatch.map((c) => c.content);
-      const embedStart = performance.now();
-      let embeddingsList: number[][];
+      const maxRateLimitRetries = config?.maxRateLimitRetries ?? 5;
+      const maxCumulativeWaitTimeSec = config?.maxCumulativeWaitTimeSec ?? 300;
+      let rateLimitAttempts = 0;
+      let cumulativeWaitTimeSec = 0;
+      let embeddingsSuccess = false;
+      let embeddingsList: number[][] = [];
 
-      try {
-        embeddingsList = await this.embeddingProvider.embedBatch(batchTexts);
-        embeddingDuration += performance.now() - embedStart;
-      } catch (error: any) {
-        console.error(`[IndexingPipeline] ❌ Embedding generation failed on Batch ${batchIndex}: ${error.message}`);
-        this.markBatchAsFailed(pageResults, chunkBatch, "embed", error.message);
-        continue; // Gracefully try next batches
+      while (!embeddingsSuccess) {
+        if (signal?.aborted) {
+          this.handleAbort(onProgress);
+          throw new DOMException("Indexing aborted by user.", "AbortError");
+        }
+
+        const embedStart = performance.now();
+        try {
+          embeddingsList = await this.embeddingProvider.embedBatch(batchTexts);
+          embeddingDuration += performance.now() - embedStart;
+          embeddingsSuccess = true;
+        } catch (error: any) {
+          const isRateLimit = error.name === "GeminiRateLimitError" || 
+                              error.status === 429 || 
+                              error.message?.includes("429");
+
+          if (isRateLimit) {
+            const retryDelaySec = error.retryDelaySec ?? parseRetryDelay(error) ?? 30;
+            rateLimitAttempts++;
+
+            if (rateLimitAttempts > maxRateLimitRetries) {
+              console.error(`[IndexingPipeline] ❌ Exceeded maximum rate limit retries (${maxRateLimitRetries}) on Batch ${batchIndex}.`);
+              this.markBatchAsFailed(pageResults, chunkBatch, "embed", `Rate limit retries exhausted: ${error.message}`);
+              break;
+            }
+
+            if (cumulativeWaitTimeSec + retryDelaySec > maxCumulativeWaitTimeSec) {
+              console.error(`[IndexingPipeline] ❌ Exceeded maximum cumulative wait time (${maxCumulativeWaitTimeSec}s) on Batch ${batchIndex}.`);
+              this.markBatchAsFailed(pageResults, chunkBatch, "embed", `Rate limit cumulative wait time exceeded: ${error.message}`);
+              break;
+            }
+
+            console.warn(`[IndexingPipeline] Rate limit hit (429) on Batch ${batchIndex}. Waiting ${retryDelaySec}s before retry ${rateLimitAttempts}/${maxRateLimitRetries}...`);
+            
+            onProgress?.({
+              stage: "embed",
+              message: `Embedding rate limit reached. Waiting ${Math.round(retryDelaySec)} seconds before retrying batch ${batchIndex}/${totalBatches}...`,
+              details: { 
+                batch: batchIndex, 
+                totalBatches, 
+                rateLimitAttempt: rateLimitAttempts,
+                maxRateLimitRetries,
+                retryDelaySec
+              },
+            });
+
+            const waitMs = retryDelaySec * 1000;
+            let elapsedMs = 0;
+            const intervalMs = 1000; // responsive 1s tick
+
+            while (elapsedMs < waitMs) {
+              if (signal?.aborted) {
+                this.handleAbort(onProgress);
+                throw new DOMException("Indexing aborted by user.", "AbortError");
+              }
+              const stepMs = Math.min(intervalMs, waitMs - elapsedMs);
+              await new Promise((resolve) => setTimeout(resolve, stepMs));
+              elapsedMs += stepMs;
+
+              const remainingSec = Math.max(0, Math.round((waitMs - elapsedMs) / 1000));
+              if (remainingSec > 0 && remainingSec % 5 === 0) {
+                onProgress?.({
+                  stage: "embed",
+                  message: `Embedding rate limit reached. Waiting ${remainingSec} seconds before retrying batch ${batchIndex}/${totalBatches}...`,
+                  details: { batch: batchIndex, totalBatches, remainingSec },
+                });
+              }
+            }
+
+            cumulativeWaitTimeSec += retryDelaySec;
+
+            onProgress?.({
+              stage: "embed",
+              message: `Retrying embedding batch (${batchIndex}/${totalBatches})...`,
+              details: { batch: batchIndex, totalBatches, rateLimitAttempt: rateLimitAttempts },
+            });
+
+            continue;
+          }
+
+          const errorType = getCategorizedErrorType(error);
+          console.error(`[IndexingPipeline] ❌ Embedding generation failed on Batch ${batchIndex} due to ${errorType}: ${error.message}`);
+          this.markBatchAsFailed(pageResults, chunkBatch, "embed", `${errorType}: ${error.message}`);
+          break;
+        }
+      }
+
+      if (!embeddingsSuccess) {
+        continue;
       }
 
       // Convert DocumentChunk array to EmbeddedDocumentChunk array
@@ -346,4 +432,68 @@ export class IndexingPipeline {
       }
     }
   }
+}
+
+/**
+ * Dynamically parses the retry delay from a Google API error.
+ */
+function parseRetryDelay(error: any): number | null {
+  if (!error) return null;
+  const details = error.errorDetails || error.statusDetails || error.details || error.error?.details;
+  if (Array.isArray(details)) {
+    for (const detail of details) {
+      if (detail && typeof detail === "object") {
+        if (detail.retryDelay) {
+          if (typeof detail.retryDelay === "string") {
+            const seconds = parseFloat(detail.retryDelay);
+            if (!isNaN(seconds)) return seconds;
+          } else if (typeof detail.retryDelay === "object" && typeof detail.retryDelay.seconds === "number") {
+            return detail.retryDelay.seconds;
+          }
+        }
+        if (detail.metadata && detail.metadata.retryDelay) {
+          const seconds = parseFloat(detail.metadata.retryDelay);
+          if (!isNaN(seconds)) return seconds;
+        }
+      }
+    }
+  }
+  const msg = error.message || (typeof error === "string" ? error : "");
+  if (msg) {
+    const regexes = [
+      /retry in ([\d\.]+)\s*s(econds?)?/i,
+      /retry after ([\d\.]+)\s*s(econds?)?/i,
+      /retryInfo\s*retryDelay:\s*([\d\.]+)s/i
+    ];
+    for (const regex of regexes) {
+      const match = msg.match(regex);
+      if (match && match[1]) {
+        const seconds = parseFloat(match[1]);
+        if (!isNaN(seconds)) return seconds;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Returns a human-friendly string categorizing the failure type.
+ */
+function getCategorizedErrorType(error: any): string {
+  if (error.status === 429 || error.message?.includes("429")) {
+    return "Rate limit (429)";
+  }
+  const msg = error.message?.toLowerCase() || "";
+  if (
+    msg.includes("fetch failed") ||
+    msg.includes("timeout") ||
+    msg.includes("econnrefused") ||
+    msg.includes("network error")
+  ) {
+    return "Network failure";
+  }
+  if (error.status >= 500 && error.status <= 599) {
+    return "Server error";
+  }
+  return "Transient error";
 }

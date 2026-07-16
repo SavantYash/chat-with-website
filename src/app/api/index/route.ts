@@ -4,9 +4,8 @@ import { createIndexingPipeline } from "@/lib/chat";
 /**
  * POST /api/index
  * 
- * Handles HTTP requests to index a target website. Instantiates dependencies
- * via the factory, runs the crawler, extracts page text, divides text into chunks,
- * generates embeddings using Gemini, and stores vectors in LanceDB.
+ * Handles HTTP requests to index a target website, streaming progress events
+ * back to the client using a text/event-stream response.
  */
 export async function POST(request: Request) {
   const requestStartTime = performance.now();
@@ -49,33 +48,69 @@ export async function POST(request: Request) {
     console.log(`[API /api/index] Instantiating dependencies via IndexingPipeline factory...`);
     const pipeline = await createIndexingPipeline();
 
-    // 4. Run crawling, chunking, and embedding generation
-    console.log(`[API /api/index] Starting indexing run for startUrl: "${url}" (maxPages: ${limitPages})...`);
-    const summary = await pipeline.run(url.trim(), {
-      maxPages: limitPages,
-      maxDepth: 3,
-      clearExisting: true, // Resets database tables for a clean crawl
+    // 4. Return Event Stream Response
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        const sendEvent = (data: any) => {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+        };
+
+        try {
+          console.log(`[API /api/index] Starting indexing run for startUrl: "${url}" (maxPages: ${limitPages})...`);
+          const summary = await pipeline.run(url.trim(), {
+            maxPages: limitPages,
+            maxDepth: 3,
+            clearExisting: true, // Resets database tables for a clean crawl
+            onProgress: (event) => {
+              sendEvent({
+                type: "progress",
+                message: event.message,
+                stage: event.stage,
+                details: event.details
+              });
+            },
+          });
+
+          const elapsed = performance.now() - requestStartTime;
+          console.log(`[API /api/index] Completed successfully in ${elapsed.toFixed(1)}ms. Total pages: ${summary.pagesIndexed}, chunks: ${summary.chunksStored}.`);
+
+          sendEvent({
+            type: "complete",
+            message: `Successfully crawled and indexed: ${url}`,
+            meta: {
+              url,
+              maxPages: limitPages,
+              totalPages: summary.pagesIndexed,
+              totalChunks: summary.chunksStored,
+              durationMs: elapsed
+            }
+          });
+          controller.close();
+        } catch (error: any) {
+          const elapsed = performance.now() - requestStartTime;
+          console.error(`[API /api/index] ❌ Indexing failure after ${elapsed.toFixed(1)}ms: ${error.message}`);
+          sendEvent({
+            type: "error",
+            error: error.message || "An unexpected error occurred during indexing."
+          });
+          controller.close();
+        }
+      }
     });
 
-    const elapsed = performance.now() - requestStartTime;
-    console.log(`[API /api/index] Completed successfully in ${elapsed.toFixed(1)}ms. Total pages: ${summary.pagesIndexed}, chunks: ${summary.chunksStored}.`);
-
-    // 5. Render telemetry response JSON
-    return NextResponse.json({
-      success: true,
-      message: `Successfully crawled and indexed: ${url}`,
-      meta: {
-        url,
-        maxPages: limitPages,
-        totalPages: summary.pagesIndexed,
-        totalChunks: summary.chunksStored,
-        durationMs: elapsed
-      }
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+      },
     });
 
   } catch (error: any) {
     const elapsed = performance.now() - requestStartTime;
-    console.error(`[API /api/index] ❌ Indexing failure after ${elapsed.toFixed(1)}ms: ${error.message}`);
+    console.error(`[API /api/index] ❌ Critical indexing error after ${elapsed.toFixed(1)}ms: ${error.message}`);
     return NextResponse.json(
       { error: `Internal indexing error: ${error.message}` },
       { status: 500 }

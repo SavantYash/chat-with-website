@@ -24,6 +24,7 @@ export default function Home() {
   const [maxPages, setMaxPages] = useState(10);
   const [isIndexing, setIsIndexing] = useState(false);
   const [indexingStatus, setIndexingStatus] = useState<string | null>(null);
+  const [indexingLogs, setIndexingLogs] = useState<string[]>([]);
   const [indexingError, setIndexingError] = useState<string | null>(null);
   const [indexingSuccess, setIndexingSuccess] = useState<boolean | null>(null);
 
@@ -34,23 +35,34 @@ export default function Home() {
   const [chatError, setChatError] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const logsEndRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll chat window to latest message
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
+  // Auto-scroll console logs to bottom
+  const scrollLogsToBottom = () => {
+    logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
   useEffect(() => {
     scrollToBottom();
   }, [chatHistory, isChatting]);
 
-  // Handle Crawl & Index Submit
+  useEffect(() => {
+    scrollLogsToBottom();
+  }, [indexingLogs]);
+
+  // Handle Crawl & Index Submit (Streaming Event Stream Reader)
   const handleIndex = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!indexingUrl.trim() || isIndexing) return;
 
     setIsIndexing(true);
     setIndexingStatus("Submitting crawl request to crawler engine...");
+    setIndexingLogs(["[System] Starting crawl & indexing pipeline request..."]);
     setIndexingError(null);
     setIndexingSuccess(null);
 
@@ -64,16 +76,53 @@ export default function Home() {
         }),
       });
 
-      const data = await res.json();
-
       if (!res.ok) {
-        throw new Error(data.error || "Crawl job failed on database ingestion.");
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || "Failed to start indexing session.");
       }
 
-      setIndexingStatus(data.message || "Indexing pipeline executed successfully!");
-      setIndexingSuccess(true);
+      const reader = res.body?.getReader();
+      if (!reader) {
+        throw new Error("Readable streams are not supported by the client browser.");
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n\n");
+        buffer = lines.pop() || ""; // Keep any partial line in buffer
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          if (line.startsWith("data: ")) {
+            const dataStr = line.slice(6);
+            try {
+              const parsed = JSON.parse(dataStr);
+              if (parsed.type === "progress") {
+                setIndexingLogs((prev) => [...prev, parsed.message]);
+                setIndexingStatus(parsed.message);
+              } else if (parsed.type === "complete") {
+                setIndexingSuccess(true);
+                setIndexingStatus(parsed.message || "Indexing completed successfully!");
+                setIndexingLogs((prev) => [...prev, `[Success] ${parsed.message}`]);
+              } else if (parsed.type === "error") {
+                throw new Error(parsed.error);
+              }
+            } catch (err: any) {
+              console.error("Stream parse exception:", line, err);
+              if (err.message) throw err;
+            }
+          }
+        }
+      }
     } catch (err: any) {
       setIndexingError(err.message || "An unexpected error occurred during indexing.");
+      setIndexingLogs((prev) => [...prev, `[Error] ${err.message || "An unexpected error occurred."}`]);
       setIndexingSuccess(false);
     } finally {
       setIsIndexing(false);
@@ -196,8 +245,47 @@ export default function Home() {
                 </button>
               </form>
 
+              {/* Console Logs Display */}
+              {indexingLogs.length > 0 && (
+                <div className="mt-4 border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden shadow-inner">
+                  <div className="bg-zinc-100 dark:bg-zinc-850 px-3 py-1.5 text-[10px] font-bold text-zinc-500 uppercase tracking-wider border-b border-zinc-200 dark:border-zinc-800 flex justify-between items-center">
+                    <span>Indexing Engine Logs</span>
+                    {isIndexing && (
+                      <span className="flex h-1.5 w-1.5 relative">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                      </span>
+                    )}
+                  </div>
+                  <div className="bg-zinc-950 p-4 font-mono text-[11px] leading-relaxed text-zinc-300 h-48 overflow-y-auto flex flex-col gap-1.5">
+                    {indexingLogs.map((log, idx) => {
+                      let colorClass = "text-zinc-300";
+                      if (log.toLowerCase().includes("rate limit") || log.toLowerCase().includes("waiting")) {
+                        colorClass = "text-amber-400 font-bold animate-pulse";
+                      } else if (log.toLowerCase().includes("success") || log.toLowerCase().includes("complete")) {
+                        colorClass = "text-emerald-400";
+                      } else if (log.toLowerCase().includes("error") || log.toLowerCase().includes("failed")) {
+                        colorClass = "text-red-400 font-bold";
+                      } else if (log.toLowerCase().includes("retrying")) {
+                        colorClass = "text-cyan-400 font-semibold";
+                      } else if (log.includes("[System]")) {
+                        colorClass = "text-zinc-500";
+                      } else if (log.includes("Progress]")) {
+                        colorClass = "text-zinc-400";
+                      }
+                      return (
+                        <div key={idx} className={`${colorClass} whitespace-pre-wrap break-all`}>
+                          {log}
+                        </div>
+                      );
+                    })}
+                    <div ref={logsEndRef} />
+                  </div>
+                </div>
+              )}
+
               {/* Indexing Feedback Messages */}
-              {indexingStatus && (
+              {indexingStatus && !indexingError && indexingSuccess !== true && (
                 <div className="mt-4 p-3 rounded-lg bg-indigo-50 text-indigo-700 text-xs border border-indigo-200 dark:bg-indigo-950/30 dark:text-indigo-400 dark:border-indigo-900/50">
                   <div className="flex items-center gap-2">
                     <span className="h-2 w-2 rounded-full bg-indigo-500 animate-ping"></span>
@@ -326,4 +414,3 @@ export default function Home() {
     </div>
   );
 }
-

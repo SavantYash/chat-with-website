@@ -2,20 +2,65 @@ import { GoogleGenAI, ApiError } from "@google/genai";
 import { EmbeddingProvider } from "./embedding-provider";
 
 /**
+ * Custom error thrown when the Gemini API rate limit is exceeded.
+ */
+export class GeminiRateLimitError extends Error {
+  readonly status = 429;
+  constructor(
+    message: string,
+    readonly retryDelaySec: number,
+    readonly originalError?: any
+  ) {
+    super(message);
+    this.name = "GeminiRateLimitError";
+  }
+}
+
+/**
+ * Dynamically parses the retry delay from a Google API error.
+ */
+export function parseRetryDelay(error: any): number | null {
+  if (!error) return null;
+  const details = error.errorDetails || error.statusDetails || error.details || error.error?.details;
+  if (Array.isArray(details)) {
+    for (const detail of details) {
+      if (detail && typeof detail === "object") {
+        if (detail.retryDelay) {
+          if (typeof detail.retryDelay === "string") {
+            const seconds = parseFloat(detail.retryDelay);
+            if (!isNaN(seconds)) return seconds;
+          } else if (typeof detail.retryDelay === "object" && typeof detail.retryDelay.seconds === "number") {
+            return detail.retryDelay.seconds;
+          }
+        }
+        if (detail.metadata && detail.metadata.retryDelay) {
+          const seconds = parseFloat(detail.metadata.retryDelay);
+          if (!isNaN(seconds)) return seconds;
+        }
+      }
+    }
+  }
+  const msg = error.message || (typeof error === "string" ? error : "");
+  if (msg) {
+    const regexes = [
+      /retry in ([\d\.]+)\s*s(econds?)?/i,
+      /retry after ([\d\.]+)\s*s(econds?)?/i,
+      /retryInfo\s*retryDelay:\s*([\d\.]+)s/i
+    ];
+    for (const regex of regexes) {
+      const match = msg.match(regex);
+      if (match && match[1]) {
+        const seconds = parseFloat(match[1]);
+        if (!isNaN(seconds)) return seconds;
+      }
+    }
+  }
+  return null;
+}
+
+/**
  * GeminiEmbeddingProvider implements the EmbeddingProvider interface using Google's 
  * official @google/genai SDK.
- * 
- * Why this class exists:
- * It bridges the gap between raw textual chunks and high-dimensional semantic search
- * queries by interfacing with Google's Gemini embeddings endpoint.
- * It encapsulates the following production features:
- * 1. Exponential Backoff Retries: Automatically retries transient issues (429, 500, 502, 503, 504)
- *    while throwing immediately on client-side setup failures (400, 401, 403).
- * 2. Sequential Batching: Avoids rate limits by slicing large inputs and querying them sequentially.
- * 3. Euclidean L2 Normalization: Adjusts vectors so their Euclidean length = 1, converting cosine
- *    similarity checks into efficient dot-product math in LanceDB.
- * 4. Runtime Dimension Integrity Check: Fails early if vectors return with mismatched or corrupt dimensions.
- * 5. Detailed Timing Telemetry: Logs processing latency metrics to optimize batch configurations.
  */
 export class GeminiEmbeddingProvider implements EmbeddingProvider {
   private readonly client: GoogleGenAI;
@@ -225,7 +270,18 @@ export class GeminiEmbeddingProvider implements EmbeddingProvider {
     while (true) {
       try {
         return await fn();
-      } catch (error) {
+      } catch (error: any) {
+        const isRateLimit = (error instanceof ApiError && error.status === 429) ||
+                            (error instanceof Error && error.message?.includes("429"));
+        if (isRateLimit) {
+          const delaySec = parseRetryDelay(error) ?? 30; // fallback to 30s
+          throw new GeminiRateLimitError(
+            `Gemini API Rate Limit Exceeded: ${error.message || error}`,
+            delaySec,
+            error
+          );
+        }
+
         attempts++;
         const isRetryable = this.checkIfErrorIsRetryable(error);
 
