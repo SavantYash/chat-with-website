@@ -12,8 +12,8 @@ async function runTest() {
 
   // Initialize store with 3-dimensional embeddings for straightforward test vectors
   const testStore = new LanceDBStore({
-    dbUri: "./data/test-lancedb",
-    tableName: "test_chunks",
+    uri: "./data/test-lancedb",
+    namespace: "test_chunks",
     embeddingDimension: 3,
   });
 
@@ -22,6 +22,7 @@ async function runTest() {
     console.log("\n1️⃣  Initializing LanceDBStore...");
     await testStore.initialize();
     console.log("   ✅ Connection established, schema verified.");
+    console.log(`   ✅ Capabilities: ${JSON.stringify(testStore.capabilities)}`);
 
     // 2. Insert dummy chunks
     console.log("\n2️⃣  Inserting 3 fake document chunks...");
@@ -61,9 +62,26 @@ async function runTest() {
       },
     ];
 
-    await testStore.addDocuments(fakeChunks);
-    console.log("   ✅ Inserted chunks successfully.");
+    await testStore.upsert(fakeChunks);
+    console.log("   ✅ Inserted chunks successfully via upsert.");
 
+    // 2B. Test count()
+    console.log("\n2️⃣B Verification: Checking count...");
+    const initialCount = await testStore.count();
+    console.log(`   Count of records: ${initialCount} (Expected: 3)`);
+    if (initialCount !== 3) throw new Error("count check failed");
+
+    // 2C. Test incremental upsert (update an existing record)
+    console.log("\n2️⃣C Verification: Testing incremental update...");
+    const updatedChunk = {
+      ...fakeChunks[0],
+      content: "LanceDB has been updated dynamically in our integration tests.",
+    };
+    await testStore.upsert([updatedChunk]);
+    const updatedCount = await testStore.count();
+    console.log(`   Count after update upsert: ${updatedCount} (Expected: 3)`);
+    if (updatedCount !== 3) throw new Error("upsert update duplicated records");
+    
     // 3. Perform Similarity Search
     // Querying with a vector close to chunk-1 ([0.12, 0.18, 0.29])
     const queryEmbedding = [0.12, 0.18, 0.29];
@@ -83,12 +101,30 @@ async function runTest() {
       console.log(`     Distance Score: ${chunk.score}`);
     });
 
-    // Verify chunk-1 is returned first due to closeness
-    if (searchResults.length > 0 && searchResults[0].id === "chunk-1") {
-      console.log("\n   🎉 SUCCESS: Correct document retrieved as top match!");
+    // Verify chunk-1 is returned first due to closeness and verify its content was updated
+    if (searchResults.length > 0 && searchResults[0].id === "chunk-1" && searchResults[0].content.includes("updated dynamically")) {
+      console.log("\n   🎉 SUCCESS: Correct updated document retrieved as top match!");
     } else {
-      console.log("\n   ❌ FAILURE: Unexpected top match.");
+      console.log("\n   ❌ FAILURE: Unexpected top match or content not updated.");
     }
+
+    // 3B. Test delete with filter (url)
+    console.log("\n3️⃣B Verification: Deleting records by URL filter (https://nextjs.org/docs)...");
+    await testStore.delete({
+      filters: [{ field: "url", operator: "eq", value: "https://nextjs.org/docs" }],
+    });
+    const countAfterDeleteUrl = await testStore.count();
+    console.log(`   Count after deleting nextjs URL: ${countAfterDeleteUrl} (Expected: 2)`);
+    if (countAfterDeleteUrl !== 2) throw new Error("delete by url filter failed");
+
+    // 3C. Test delete with filter (id IN)
+    console.log("\n3️⃣C Verification: Deleting chunk-3 by ID filter...");
+    await testStore.delete({
+      filters: [{ field: "id", operator: "in", value: ["chunk-3"] }],
+    });
+    const countAfterDeleteId = await testStore.count();
+    console.log(`   Count after deleting chunk-3 ID: ${countAfterDeleteId} (Expected: 1)`);
+    if (countAfterDeleteId !== 1) throw new Error("delete by id filter failed");
 
     // 4. Clear table and clean up
     console.log("\n4️⃣  Clearing store and deleting test tables...");

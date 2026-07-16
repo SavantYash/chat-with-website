@@ -63,8 +63,8 @@ async function runTest() {
     });
 
     const vectorStore = new LanceDBStore({
-      dbUri: dbPath,
-      tableName: "retrieval_chunks",
+      uri: dbPath,
+      namespace: "retrieval_chunks",
       embeddingDimension: 768,
     });
 

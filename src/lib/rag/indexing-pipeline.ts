@@ -232,13 +232,13 @@ export class IndexingPipeline {
       // 5B. Write Batch to Vector Store
       onProgress?.({
         stage: "store",
-        message: `Storing batch ${batchIndex}/${totalBatches} in LanceDB...`,
+        message: `Storing batch ${batchIndex}/${totalBatches} in ${this.vectorStore.constructor.name}...`,
         details: { batch: batchIndex, totalBatches, itemsCount: embeddedChunks.length },
       });
 
       const storeStart = performance.now();
       try {
-        await this.vectorStore.addDocuments(embeddedChunks);
+        await this.vectorStore.upsert(embeddedChunks);
         storageDuration += performance.now() - storeStart;
         chunksStored += embeddedChunks.length;
         console.log(`[IndexingPipeline] Batch [${batchIndex}/${totalBatches}] persisted in ${(performance.now() - storeStart).toFixed(1)}ms.`);

@@ -61,8 +61,8 @@ async function runTest() {
     });
 
     const vectorStore = new LanceDBStore({
-      dbUri: "./data/lancedb",
-      tableName: "web_chunks",
+      uri: "./data/lancedb",
+      namespace: "web_chunks",
       embeddingDimension: 768,
     });
 

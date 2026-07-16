@@ -51,8 +51,8 @@ async function runEndToEndVerification() {
     // 1. Initialize Vector Store to Inspect Counts
     console.log("\n1️⃣  Connecting to LanceDB Store...");
     const vectorStore = new LanceDBStore({
-      dbUri: "./data/lancedb",
-      tableName: "web_chunks",
+      uri: "./data/lancedb",
+      namespace: "web_chunks",
       embeddingDimension: 768,
     });
     await vectorStore.initialize();

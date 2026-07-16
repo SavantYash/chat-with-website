@@ -32,8 +32,8 @@ export async function createChatService(): Promise<ChatService> {
 
   // Reuses the exact same LanceDB dbUri and tableName as the indexing pipeline
   const vectorStore = new LanceDBStore({
-    dbUri: "./data/lancedb",
-    tableName: "web_chunks",
+    uri: "./data/lancedb",
+    namespace: "web_chunks",
     embeddingDimension: 768, // Matches Gemini embedding dimension output size
   });
 
@@ -75,8 +75,8 @@ export async function createIndexingPipeline(): Promise<IndexingPipeline> {
   });
 
   const vectorStore = new LanceDBStore({
-    dbUri: "./data/lancedb",
-    tableName: "web_chunks",
+    uri: "./data/lancedb",
+    namespace: "web_chunks",
     embeddingDimension: 768,
   });
 

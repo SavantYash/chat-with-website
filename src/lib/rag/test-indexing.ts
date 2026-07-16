@@ -64,8 +64,8 @@ async function runTest() {
       normalizeVectors: true,
     });
     const vectorStore = new LanceDBStore({
-      dbUri: dbPath,
-      tableName: "indexed_chunks",
+      uri: dbPath,
+      namespace: "indexed_chunks",
       embeddingDimension: 768,
     });
 

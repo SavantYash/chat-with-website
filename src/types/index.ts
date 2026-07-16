@@ -94,6 +94,28 @@ export interface DocumentChunk {
   score?: number;
 }
 
+export interface MetadataFilter {
+  field: string;
+  operator: "eq" | "neq" | "gt" | "lt" | "contains" | "in";
+  value: any;
+}
+
+export interface SearchOptions {
+  filters?: MetadataFilter[];
+}
+
+export interface VectorStoreCapabilities {
+  supportsMetadataFiltering: boolean;
+  supportsUpsert: boolean;
+  supportsDelete: boolean;
+}
+
+export interface VectorStoreConfig {
+  uri: string;
+  namespace?: string;
+  embeddingDimension: number;
+}
+
 /**
  * Interface defining the operations for a vector database.
  * This acts as the boundary abstraction (Dependency Inversion Principle),
@@ -101,15 +123,14 @@ export interface DocumentChunk {
  */
 export interface VectorStore {
   /**
+   * Describes the capabilities supported by this specific vector store adapter.
+   */
+  readonly capabilities: VectorStoreCapabilities;
+
+  /**
    * Initializes the database connection, ensures schema definitions, and establishes initial connections.
    */
   initialize(): Promise<void>;
-
-  /**
-   * Inserts or updates an array of document chunks in the database.
-   * @param documents Array of chunks to index.
-   */
-  addDocuments(documents: DocumentChunk[]): Promise<void>;
 
   /**
    * Performs a similarity search based on the provided query vector.
@@ -117,13 +138,31 @@ export interface VectorStore {
    * 
    * @param queryEmbedding The semantic vector embedding of the user's query.
    * @param limit The maximum number of results to return (k).
-   * @param options Optional database-specific overrides or filtering parameters.
+   * @param options Optional search parameters, including metadata filters.
    */
   similaritySearch(
     queryEmbedding: number[],
     limit: number,
-    options?: Record<string, unknown>
+    options?: SearchOptions
   ): Promise<DocumentChunk[]>;
+
+  /**
+   * Inserts or updates an array of document chunks in the database.
+   * @param documents Array of chunks to index.
+   */
+  upsert(documents: DocumentChunk[]): Promise<void>;
+
+  /**
+   * Deletes document chunks matching standard metadata filters.
+   * 
+   * @param options Filter options defining which documents to delete.
+   */
+  delete(options: SearchOptions): Promise<void>;
+
+  /**
+   * Returns the total number of document chunks currently indexed.
+   */
+  count(): Promise<number>;
 
   /**
    * Resets the store by clearing all documents or dropping the active tables.
