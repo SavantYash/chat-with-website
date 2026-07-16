@@ -51,6 +51,7 @@ async function runEndToEndVerification() {
     // 1. Initialize Vector Store to Inspect Counts
     console.log("\n1️⃣  Connecting to Mock Vector Store...");
     const vectorStore = new MockVectorStore({
+      uri: "mock://",
       namespace: "web_chunks",
       embeddingDimension: 768,
     });
