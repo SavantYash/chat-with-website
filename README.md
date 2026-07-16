@@ -72,6 +72,37 @@ graph TD
 
 ---
 
+## 🏛️ Architecture & Abstraction
+
+The system employs a **layered architecture** with clear separation of concerns:
+
+- **Frontend Layer** (`src/app/page.tsx`): React Client Components handle user interactions, crawler logs, and chat history display. The frontend communicates exclusively through REST API endpoints and has no direct access to databases or external services.
+- **API Layer** (`src/app/api/`): Next.js API routes (`/api/index` and `/api/chat`) abstract all business logic from the client. These routes serve as the single interface between frontend and backend services.
+- **Backend Services** (`src/lib/`): Core business logic encapsulates crawling, RAG indexing, vector retrieval, and prompt generation. All services are decoupled via Dependency Injection, making components testable and swappable.
+- **External Services**: Google Gemini API handles embeddings and LLM chat completions. Vector storage is managed locally via LanceDB, with abstract interfaces enabling future adapters (e.g., pgvector, Pinecone).
+
+This abstraction ensures that frontend changes remain independent of backend logic, and external service integrations are swappable through the factory pattern.
+
+---
+
+## 🔧 Backend Functions & Orchestration
+
+The backend exposes two primary API endpoints that orchestrate the RAG pipeline:
+
+### Index Orchestrator (`POST /api/index`)
+- **Purpose**: Initiates website crawling and vector indexing.
+- **What it does**: Validates the target URL, spawns the crawler to fetch pages (respecting `robots.txt`), extracts semantic content via HTML processing, chunks the text with overlapping boundaries, generates embeddings via Gemini API, and persists vectors to LanceDB.
+- **Why it exists**: Encapsulates the entire indexing workflow server-side, preventing frontend blocking and centralizing error handling, rate limiting, and retry logic.
+- **Database & API interaction**: Writes indexed chunks and metadata to LanceDB; communicates with Gemini Embedding API for vector generation. Returns live SSE stream with progress updates.
+
+### Chat Engine (`POST /api/chat`)
+- **Purpose**: Generates grounded answers by retrieving relevant context and calling the LLM.
+- **What it does**: Embeds the user query via Gemini, retrieves top matching chunks from LanceDB using vector similarity, constructs a grounded prompt with context, calls Gemini for generation, and returns the response with source citations.
+- **Why it exists**: Centralizes retrieval, LLM coordination, and context assembly server-side. The frontend sends only the user message; all business logic is backend-owned.
+- **Database & API interaction**: Reads indexed vectors from LanceDB and queries Gemini Chat API. Enforces system prompts to keep responses grounded in retrieved context.
+
+---
+
 ## 📂 Project Structure
 
 ```text
