@@ -4,10 +4,44 @@ import { PromptBuilder } from "./prompt-builder";
 import { GeminiChatProvider } from "../llm/gemini-chat";
 import { GeminiEmbeddingProvider } from "../llm/gemini-embedding";
 import { LanceDBStore } from "../db/lancedb-store";
+import { PgVectorStore } from "../db/pgvector-store";
 import { IndexingPipeline } from "../rag/indexing-pipeline";
 import { WebsiteCrawler } from "../crawler/crawler";
 import { HtmlExtractor } from "../rag/html-extractor";
 import { DocumentChunker } from "../rag/chunker";
+
+function createVectorStore() {
+  const vectorDb = process.env.VECTOR_DB?.toLowerCase() || "lancedb";
+
+  switch (vectorDb) {
+    case "supabase": {
+      const supabaseUrl = process.env.SUPABASE_URL;
+      const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+      if (!supabaseUrl) {
+        throw new Error("[VectorStoreFactory] SUPABASE_URL environment variable is not defined.");
+      }
+      if (!serviceRoleKey) {
+        throw new Error("[VectorStoreFactory] SUPABASE_SERVICE_ROLE_KEY environment variable is not defined.");
+      }
+
+      return new PgVectorStore({
+        uri: supabaseUrl,
+        serviceRoleKey,
+        namespace: "web_chunks",
+        embeddingDimension: 768,
+      });
+    }
+
+    case "lancedb":
+    default:
+      return new LanceDBStore({
+        uri: "./data/lancedb",
+        namespace: "web_chunks",
+        embeddingDimension: 768,
+      });
+  }
+}
 
 /**
  * Creates and initializes a ChatService instance by resolving all DI dependencies.
@@ -30,12 +64,7 @@ export async function createChatService(): Promise<ChatService> {
     normalizeVectors: true,
   });
 
-  // Reuses the exact same LanceDB dbUri and tableName as the indexing pipeline
-  const vectorStore = new LanceDBStore({
-    uri: "./data/lancedb",
-    namespace: "web_chunks",
-    embeddingDimension: 768, // Matches Gemini embedding dimension output size
-  });
+  const vectorStore = createVectorStore();
 
   // Pre-initialize connection schema mappings
   await vectorStore.initialize();
@@ -74,11 +103,7 @@ export async function createIndexingPipeline(): Promise<IndexingPipeline> {
     normalizeVectors: true,
   });
 
-  const vectorStore = new LanceDBStore({
-    uri: "./data/lancedb",
-    namespace: "web_chunks",
-    embeddingDimension: 768,
-  });
+  const vectorStore = createVectorStore();
 
   await vectorStore.initialize();
 

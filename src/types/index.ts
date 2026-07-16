@@ -133,6 +133,12 @@ export interface VectorStore {
   initialize(): Promise<void>;
 
   /**
+   * Validates that the vector database is reachable, configured correctly, and ready for indexing.
+   * The indexing pipeline calls this as a pre-flight check before crawling or embedding work begins.
+   */
+  validate(): Promise<void>;
+
+  /**
    * Performs a similarity search based on the provided query vector.
    * Returns the top-k most similar document chunks, including their similarity scores.
    * 
@@ -243,7 +249,7 @@ export interface IndexingSummary {
  * Event broadcasted via onProgress callback.
  */
 export interface IndexingProgressEvent {
-  stage: "initialize" | "crawl" | "extract" | "chunk" | "embed" | "store" | "complete" | "cancel";
+  stage: "initialize" | "validate" | "crawl" | "extract" | "chunk" | "embed" | "store" | "complete" | "cancel";
   message: string;
   details?: Record<string, unknown>;
 }

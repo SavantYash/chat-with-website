@@ -64,6 +64,26 @@ export class IndexingPipeline {
       message: "Orchestration initialized. Validated configurations.",
     });
 
+    onProgress?.({
+      stage: "validate",
+      message: "Validating vector store connectivity and configuration before indexing...",
+    });
+
+    try {
+      await this.vectorStore.validate();
+      onProgress?.({
+        stage: "validate",
+        message: "Vector store validation completed successfully.",
+      });
+    } catch (error: any) {
+      const message = error.message || String(error);
+      onProgress?.({
+        stage: "validate",
+        message: `Vector store validation failed: ${message}`,
+      });
+      throw new Error(`Indexing aborted due to vector store validation failure: ${message}`);
+    }
+
     if (signal?.aborted) {
       this.handleAbort(onProgress);
       throw new DOMException("Indexing aborted by user.", "AbortError");

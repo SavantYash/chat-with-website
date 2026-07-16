@@ -42,6 +42,10 @@ export class MockVectorStore implements VectorStore {
     this.isInitialized = true;
   }
 
+  async validate(): Promise<void> {
+    this.checkInitialized();
+  }
+
   private checkInitialized() {
     if (!this.isInitialized) {
       throw new Error("MockVectorStore is not initialized. Call initialize() first.");

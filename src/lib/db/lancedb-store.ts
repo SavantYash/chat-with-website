@@ -116,6 +116,18 @@ export class LanceDBStore implements VectorStore {
   }
 
   /**
+   * Validates that the LanceDB store is available and the table is accessible.
+   */
+  async validate(): Promise<void> {
+    try {
+      await this.count();
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      throw new Error(`LanceDB validation failed: ${errorMessage}`);
+    }
+  }
+
+  /**
    * Builds a SQL filter expression from domain-level metadata filters.
    */
   private buildSqlFilter(filters: MetadataFilter[]): string {

@@ -268,6 +268,8 @@ export default function Home() {
                         colorClass = "text-red-400 font-bold";
                       } else if (log.toLowerCase().includes("retrying")) {
                         colorClass = "text-cyan-400 font-semibold";
+                      } else if (log.toLowerCase().includes("validation")) {
+                        colorClass = "text-sky-400";
                       } else if (log.includes("[System]")) {
                         colorClass = "text-zinc-500";
                       } else if (log.includes("Progress]")) {

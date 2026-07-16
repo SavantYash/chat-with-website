@@ -12,6 +12,7 @@
     "@google/genai": "^2.11.0",
     "@lancedb/lancedb": "^0.31.0",
     "@mozilla/readability": "^0.6.0",
+    "@supabase/supabase-js": "^2.39.0",
     "cheerio": "^1.2.0",
     "jsdom": "^28.1.0",
     "lancedb": "^0.0.1",
