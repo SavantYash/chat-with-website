@@ -31,7 +31,7 @@ graph TD
 *   **HTML Extractor** (`src/lib/rag/html-extractor`): Employs Mozilla Readability on a simulated JSDOM (with Cheerio as a fallback) to strip scripts, styles, and headers, returning semantic Markdown structures (lists, headings, code blocks).
 *   **Document Chunker** (`src/lib/rag/chunker`): Segments page markdown content into overlapping text blocks. Snaps window breaks to paragraphs, sentences, or word boundaries to preserve linguistic context.
 *   **Embedding Provider** (`src/lib/llm/gemini-embedding`): Batches strings, communicates with the Gemini Embedding API, handles unit L2 normalization, and propagates retry information.
-*   **Vector Store** (`src/lib/db/lancedb-store`): Receives embedded document chunks and persists them in LanceDB utilizing Apache Arrow formats. Supports vector similarity lookups and SQL-like metadata filtering.
+*   **Vector Store** (`src/lib/db/pgvector-store`): Stores embedded document chunks in Supabase using pgvector extension for PostgreSQL. Supports vector similarity lookups and SQL-like metadata filtering via the standard VectorStore interface.
 
 ---
 

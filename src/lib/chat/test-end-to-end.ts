@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { createIndexingPipeline, createChatService } from "./factory";
-import { LanceDBStore } from "../db/lancedb-store";
+import { MockVectorStore } from "../db/mock-store";
 
 /**
  * Programmatic .env.local loader for standalone runners.
@@ -49,9 +49,8 @@ async function runEndToEndVerification() {
 
   try {
     // 1. Initialize Vector Store to Inspect Counts
-    console.log("\n1️⃣  Connecting to LanceDB Store...");
-    const vectorStore = new LanceDBStore({
-      uri: "./data/lancedb",
+    console.log("\n1️⃣  Connecting to Mock Vector Store...");
+    const vectorStore = new MockVectorStore({
       namespace: "web_chunks",
       embeddingDimension: 768,
     });

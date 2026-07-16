@@ -5,7 +5,7 @@ import { Retriever } from "./retriever";
 import { PromptBuilder } from "./prompt-builder";
 import { GeminiChatProvider } from "../llm/gemini-chat";
 import { GeminiEmbeddingProvider } from "../llm/gemini-embedding";
-import { LanceDBStore } from "../db/lancedb-store";
+import { MockVectorStore } from "../db/mock-store";
 
 /**
  * Programmatic .env.local loader for standalone runners.
@@ -60,8 +60,7 @@ async function runTest() {
       normalizeVectors: true,
     });
 
-    const vectorStore = new LanceDBStore({
-      uri: "./data/lancedb",
+    const vectorStore = new MockVectorStore({
       namespace: "web_chunks",
       embeddingDimension: 768,
     });

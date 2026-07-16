@@ -5,7 +5,7 @@ import { WebsiteCrawler } from "../crawler/crawler";
 import { HtmlExtractor } from "./html-extractor";
 import { DocumentChunker } from "./chunker";
 import { GeminiEmbeddingProvider } from "../llm/gemini-embedding";
-import { LanceDBStore } from "../db/lancedb-store";
+import { MockVectorStore } from "../db/mock-store";
 
 /**
  * Programmatic .env.local loader for standalone runners.
@@ -63,7 +63,7 @@ async function runTest() {
       apiKey,
       normalizeVectors: true,
     });
-    const vectorStore = new LanceDBStore({
+    const vectorStore = new MockVectorStore({
       uri: dbPath,
       namespace: "indexed_chunks",
       embeddingDimension: 768,

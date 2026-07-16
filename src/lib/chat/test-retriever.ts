@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { Retriever } from "./retriever";
 import { GeminiEmbeddingProvider } from "../llm/gemini-embedding";
-import { LanceDBStore } from "../db/lancedb-store";
+import { MockVectorStore } from "../db/mock-store";
 import { IndexingPipeline } from "../rag/indexing-pipeline";
 import { WebsiteCrawler } from "../crawler/crawler";
 import { HtmlExtractor } from "../rag/html-extractor";
@@ -62,7 +62,7 @@ async function runTest() {
       normalizeVectors: true,
     });
 
-    const vectorStore = new LanceDBStore({
+    const vectorStore = new MockVectorStore({
       uri: dbPath,
       namespace: "retrieval_chunks",
       embeddingDimension: 768,

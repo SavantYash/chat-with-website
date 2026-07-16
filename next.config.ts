@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["@lancedb/lancedb"]
+  serverExternalPackages: ["jsdom"]
 };
 
 export default nextConfig;
