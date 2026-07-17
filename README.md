@@ -287,7 +287,7 @@ Standalone test scripts reside in the codebase to verify components independentl
 
 ## 🎥 Demo Video & Deployment
 
-*   **Live Demo Deployment**: `[Placeholder: Link to live hosted deployment instance]`
+*   **Live Demo Deployment**: `https://chat-with-website1.netlify.app/`
 *   **Product Demo Recording**: `https://drive.google.com/file/d/1RNVMJK-LWiC0UU9-Hu2BXYFt4Ti6uest/view?usp=sharing`
 
 ---
