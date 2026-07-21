@@ -1,5 +1,6 @@
 import { VectorStore, DocumentChunk } from "../../types";
 import { EmbeddingProvider } from "../llm/embedding-provider";
+import { normalizeQuery } from "./query-normalizer";
 
 /**
  * Retriever orchestrates the semantic query retrieval process in the RAG system.
@@ -27,15 +28,16 @@ export class Retriever {
    */
   async retrieve(question: string, topK: number = 3): Promise<DocumentChunk[]> {
     const retrievalStart = performance.now();
+    const normalizedQuestion = normalizeQuery(question);
 
-    console.log(`[Retriever] Starting retrieval for query: "${question}" (topK: ${topK})`);
+    console.log(`[Retriever] Starting retrieval for query: "${question}" (normalized: "${normalizedQuestion}", topK: ${topK})`);
 
     // 1. Generate query embedding vector
     const embedStart = performance.now();
     let queryEmbedding: number[];
     try {
       console.log(`[Retriever] Requesting vector embedding from provider: ${this.embeddingProvider.getModelName()}...`);
-      queryEmbedding = await this.embeddingProvider.embed(question);
+      queryEmbedding = await this.embeddingProvider.embed(normalizedQuestion || question);
     } catch (error: any) {
       console.error(`[Retriever] ❌ Failed to generate embedding for query: ${error.message}`);
       throw error;

@@ -67,6 +67,14 @@ interface IndexingSummaryMeta {
   durationMs: number;
 }
 
+interface RateLimitWaitState {
+  isWaiting: boolean;
+  retry: number;
+  maxRetries: number;
+  waitSeconds: number;
+  remainingSec: number;
+}
+
 export default function Home() {
   // Indexing State
   const [indexingUrl, setIndexingUrl] = useState("");
@@ -77,6 +85,7 @@ export default function Home() {
   const [indexingError, setIndexingError] = useState<string | null>(null);
   const [indexingSuccess, setIndexingSuccess] = useState<boolean | null>(null);
   const [indexingCancelled, setIndexingCancelled] = useState(false);
+  const [rateLimitWaitState, setRateLimitWaitState] = useState<RateLimitWaitState | null>(null);
 
   // Dynamic Telemetry Metrics
   const [crawledPagesCount, setCrawledPagesCount] = useState<number>(0);
@@ -272,6 +281,7 @@ export default function Home() {
     setIndexingError(null);
     setIndexingSuccess(null);
     setSummaryMeta(null);
+    setRateLimitWaitState(null);
 
     setCrawledPagesCount(0);
     setChunksCreatedCount(0);
@@ -321,10 +331,34 @@ export default function Home() {
             const dataStr = line.slice(6);
             try {
               const parsed = JSON.parse(dataStr);
-              if (parsed.type === "progress") {
+              const action = parsed.details?.action;
+
+              if (parsed.type === "rate_limit" || action === "rate_limit" || action === "rate_limit_tick") {
+                const d = parsed.details || {};
+                setRateLimitWaitState({
+                  isWaiting: true,
+                  retry: d.retry || 1,
+                  maxRetries: d.maxRetries || 5,
+                  waitSeconds: d.waitSeconds || 60,
+                  remainingSec: d.remainingSec ?? 60,
+                });
+                if (action === "rate_limit") {
+                  appendStructuredLog(
+                    "warning",
+                    `⚠ Rate limit reached. Waiting ${d.waitSeconds} seconds before retry ${d.retry}/${d.maxRetries}...`
+                  );
+                }
+              } else if (action === "rate_limit_success") {
+                setRateLimitWaitState(null);
+                appendStructuredLog("success", "✓ Retry successful. Continuing indexing...");
+              } else if (parsed.type === "progress") {
+                if (parsed.stage === "store" || parsed.stage === "complete") {
+                  setRateLimitWaitState(null);
+                }
                 setIndexingStatus(parsed.message.split("\n")[0]);
                 processBackendProgressEvent(parsed.message, parsed.stage, parsed.details);
               } else if (parsed.type === "complete") {
+                setRateLimitWaitState(null);
                 setIndexingSuccess(true);
                 setHasSuccessfullyIndexed(true);
                 setIndexingStatus("Indexing completed successfully!");
@@ -341,6 +375,7 @@ export default function Home() {
                 appendStructuredLog("success", "Indexing completed successfully");
                 addToast("Indexing completed successfully!", "success");
               } else if (parsed.type === "error") {
+                setRateLimitWaitState(null);
                 throw new Error(parsed.error);
               }
             } catch (err: any) {
@@ -352,6 +387,7 @@ export default function Home() {
         }
       }
     } catch (err: any) {
+      setRateLimitWaitState(null);
       if (err.name === "AbortError" || controller.signal.aborted) {
         setIndexingCancelled(true);
         setIndexingStatus("Indexing run was cancelled by user.");
@@ -365,6 +401,7 @@ export default function Home() {
       }
     } finally {
       setIsIndexing(false);
+      setRateLimitWaitState(null);
       abortControllerRef.current = null;
     }
   };
@@ -474,30 +511,47 @@ export default function Home() {
       </div>
 
       {/* Header */}
-      <header className="border-b border-zinc-200 bg-white px-6 py-4 dark:border-zinc-800 dark:bg-zinc-900 shadow-xs">
+      <header className="border-b border-zinc-800 bg-zinc-900 px-6 py-3.5 flex-shrink-0">
         <div className="mx-auto max-w-7xl flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-3">
             <div className="h-8 w-8 rounded-lg bg-indigo-600 dark:bg-indigo-500 flex items-center justify-center text-white shadow-xs">
               <Globe className="w-5 h-5" />
             </div>
-            <span className="text-xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-violet-500 dark:from-indigo-400 dark:to-violet-400">
-              RAG Website Assistant
-            </span>
+            <div>
+              <h1 className="text-base font-bold tracking-tight text-zinc-100 flex items-center gap-2">
+                RAG Website Assistant
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700">
+                  v1.0
+                </span>
+              </h1>
+            </div>
           </div>
+
           <div className="flex items-center gap-3">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-900/50">
+            <span className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-950/40 text-emerald-400 border border-emerald-900/50">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
               Backend Active
             </span>
+
+            <a
+              href={GITHUB_REPO_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-zinc-700 bg-zinc-800/80 hover:bg-zinc-800 hover:border-zinc-600 text-xs font-medium text-zinc-200 transition-all shadow-xs group"
+            >
+              <GithubIcon className="w-4 h-4 text-zinc-300 group-hover:text-white transition-colors" />
+              <span>View Source</span>
+              <ExternalLink className="w-3 h-3 text-zinc-500 group-hover:text-zinc-300 transition-colors" />
+            </a>
           </div>
         </div>
       </header>
 
       {/* Main Grid Dashboard */}
-      <main className="mx-auto max-w-7xl w-full flex-1 px-4 py-8 md:px-6">
-        <div className="grid grid-cols-1 gap-8 md:grid-cols-3 h-full">
-          {/* Indexing Section (Left Dashboard Panel) */}
-          <section className="md:col-span-1 flex flex-col gap-6">
+      <main className="mx-auto max-w-7xl w-full flex-1 overflow-hidden h-[calc(100vh-65px)] p-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 h-full">
+          {/* Indexing Section (Left Dashboard Panel - Independent Scroll) */}
+          <section className="md:col-span-1 h-full overflow-y-auto pr-1 flex flex-col gap-6">
             
             {/* Target Input Section Card */}
             <div className="border border-zinc-200 rounded-xl bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900 shadow-xs flex flex-col gap-4">
@@ -597,6 +651,73 @@ export default function Home() {
                 </div>
               </form>
             </div>
+
+            {/* Prominent Gemini API Rate Limit Warning Card */}
+            {rateLimitWaitState && rateLimitWaitState.isWaiting && isIndexing && (
+              <div className="border border-amber-800 rounded-xl bg-amber-950/40 p-5 shadow-lg flex flex-col gap-3 animate-in fade-in">
+                <div className="flex items-center justify-between border-b border-amber-900/60 pb-2.5">
+                  <div className="flex items-center gap-2.5">
+                    <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0 animate-pulse" />
+                    <h3 className="font-bold text-sm text-amber-200">
+                      Gemini API Rate Limit
+                    </h3>
+                  </div>
+                  <span className="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-amber-900/60 text-amber-300 border border-amber-800">
+                    Retry {rateLimitWaitState.retry} of {rateLimitWaitState.maxRetries}
+                  </span>
+                </div>
+
+                <p className="text-xs text-amber-300 leading-relaxed">
+                  The free Gemini quota has been reached. Indexing is paused while waiting for the quota window to reset.
+                </p>
+
+                <div className="flex flex-col gap-1.5 pt-1">
+                  <div className="flex justify-between items-center text-xs font-mono">
+                    <span className="text-amber-400 font-semibold">Retrying automatically in</span>
+                    <span className="text-amber-200 font-bold">{rateLimitWaitState.remainingSec} seconds...</span>
+                  </div>
+
+                  <div className="h-2.5 w-full bg-amber-950 rounded-full overflow-hidden border border-amber-900/80">
+                    <div
+                      className="h-full bg-amber-500 rounded-full transition-all duration-300"
+                      style={{
+                        width: `${Math.min(100, Math.max(0, (rateLimitWaitState.remainingSec / (rateLimitWaitState.waitSeconds || 1)) * 100))}%`
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Quota Exhaustion Fallback Card */}
+            {indexingError && isRateLimitError(indexingError) && !isIndexing && (
+              <div className="border border-red-900/80 rounded-xl bg-red-950/40 p-5 shadow-lg flex flex-col gap-3 animate-in fade-in">
+                <div className="flex items-center gap-2.5 border-b border-red-900/60 pb-2.5">
+                  <AlertTriangle className="w-5 h-5 text-red-400 flex-shrink-0" />
+                  <h3 className="font-bold text-sm text-red-200">Rate limit reached</h3>
+                </div>
+                <p className="text-xs text-red-300 leading-relaxed">
+                  The free Gemini API quota has been exhausted. Please wait a few minutes and try again.
+                </p>
+                <div className="pt-1">
+                  <span className="text-xs text-zinc-400 block mb-2">If the issue continues, you can:</span>
+                  <a
+                    href={GITHUB_REPO_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-between gap-3 p-3 rounded-lg bg-zinc-950 border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-850 transition-all text-xs font-semibold text-zinc-100 group"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <GithubIcon className="w-4 h-4 text-zinc-300 group-hover:text-white transition-colors" />
+                      <span>View Project on GitHub</span>
+                    </div>
+                    <span className="text-[10px] text-zinc-500 font-mono group-hover:text-zinc-400">
+                      github.com/SavantYash/chat-with-website
+                    </span>
+                  </a>
+                </div>
+              </div>
+            )}
 
             {/* Live Website Status Card */}
             {(isIndexing || indexingCancelled || (indexingError && !summaryMeta)) && (
@@ -827,30 +948,10 @@ export default function Home() {
                 </div>
               )}
             </div>
-
-            {/* Always-Visible GitHub Repository Card */}
-            <div className="border border-zinc-800 rounded-xl bg-zinc-900 p-4 flex flex-col gap-3 shadow-xs">
-              <span className="text-xs text-zinc-400">Need help or found a bug?</span>
-              <a
-                href={GITHUB_REPO_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center justify-between gap-3 p-3 rounded-lg bg-zinc-950 border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-850 transition-all text-xs font-semibold text-zinc-100 group"
-              >
-                <div className="flex items-center gap-2.5">
-                  <GithubIcon className="w-4 h-4 text-zinc-300 group-hover:text-white transition-colors" />
-                  <span>View Source on GitHub</span>
-                </div>
-                <span className="text-[10px] text-zinc-500 font-mono group-hover:text-zinc-400">
-                  github.com/SavantYash/chat-with-website
-                </span>
-              </a>
-            </div>
-
           </section>
 
-          {/* Chat Section (Right Column) */}
-          <section className="md:col-span-2 flex flex-col h-[700px] border border-zinc-200 rounded-xl bg-white dark:border-zinc-800 dark:bg-zinc-900 shadow-xs overflow-hidden">
+          {/* Chat Section (Right Column - Independent Fixed Container) */}
+          <section className="md:col-span-2 flex flex-col h-full border border-zinc-800 rounded-xl bg-zinc-900 shadow-xs overflow-hidden">
             <div className="px-6 py-4 border-b border-zinc-200 dark:border-zinc-800 flex justify-between items-center">
               <h2 className="text-lg font-semibold text-zinc-800 dark:text-zinc-200 flex items-center gap-2">
                 <Sparkles className="w-5 h-5 text-indigo-500" />

@@ -59,8 +59,9 @@ export async function POST(request: Request) {
             clearExisting: true, // Resets database tables for a clean crawl
             signal: request.signal,
             onProgress: (event) => {
+              const isRateLimit = event.details?.action === "rate_limit" || event.details?.action === "rate_limit_tick";
               sendEvent({
-                type: "progress",
+                type: isRateLimit ? "rate_limit" : "progress",
                 message: event.message,
                 stage: event.stage,
                 details: event.details

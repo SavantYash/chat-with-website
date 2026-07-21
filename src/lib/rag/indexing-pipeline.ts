@@ -279,15 +279,19 @@ export class IndexingPipeline {
 
             console.warn(`[IndexingPipeline] Rate limit hit (429) on Batch ${batchIndex}. Waiting ${retryDelaySec}s before retry ${rateLimitAttempts}/${maxRateLimitRetries}...`);
             
+            const waitSec = Math.round(retryDelaySec);
+
             onProgress?.({
               stage: "embed",
-              message: `Embedding rate limit reached. Waiting ${Math.round(retryDelaySec)} seconds before retrying batch ${batchIndex}/${totalBatches}...`,
+              message: `Gemini rate limit reached. Waiting ${waitSec} seconds before retrying...`,
               details: { 
+                action: "rate_limit",
                 batch: batchIndex, 
                 totalBatches, 
-                rateLimitAttempt: rateLimitAttempts,
-                maxRateLimitRetries,
-                retryDelaySec
+                retry: rateLimitAttempts,
+                maxRetries: maxRateLimitRetries,
+                waitSeconds: waitSec,
+                remainingSec: waitSec,
               },
             });
 
@@ -305,13 +309,19 @@ export class IndexingPipeline {
               elapsedMs += stepMs;
 
               const remainingSec = Math.max(0, Math.round((waitMs - elapsedMs) / 1000));
-              if (remainingSec > 0 && remainingSec % 5 === 0) {
-                onProgress?.({
-                  stage: "embed",
-                  message: `Embedding rate limit reached. Waiting ${remainingSec} seconds before retrying batch ${batchIndex}/${totalBatches}...`,
-                  details: { batch: batchIndex, totalBatches, remainingSec },
-                });
-              }
+              onProgress?.({
+                stage: "embed",
+                message: `Gemini rate limit reached. Waiting ${remainingSec} seconds before retrying...`,
+                details: {
+                  action: "rate_limit_tick",
+                  batch: batchIndex,
+                  totalBatches,
+                  retry: rateLimitAttempts,
+                  maxRetries: maxRateLimitRetries,
+                  waitSeconds: waitSec,
+                  remainingSec,
+                },
+              });
             }
 
             cumulativeWaitTimeSec += retryDelaySec;
@@ -319,7 +329,7 @@ export class IndexingPipeline {
             onProgress?.({
               stage: "embed",
               message: `Retrying embedding batch (${batchIndex}/${totalBatches})...`,
-              details: { batch: batchIndex, totalBatches, rateLimitAttempt: rateLimitAttempts },
+              details: { action: "rate_limit_retry", batch: batchIndex, totalBatches, retry: rateLimitAttempts },
             });
 
             continue;
@@ -329,6 +339,18 @@ export class IndexingPipeline {
           console.error(`[IndexingPipeline] ❌ Embedding generation failed on Batch ${batchIndex} due to ${errorType}: ${error.message}`);
           this.markBatchAsFailed(pageResults, chunkBatch, "embed", `${errorType}: ${error.message}`);
           break;
+        }
+
+        if (embeddingsSuccess && rateLimitAttempts > 0) {
+          onProgress?.({
+            stage: "embed",
+            message: "✓ Retry successful. Continuing indexing...",
+            details: {
+              action: "rate_limit_success",
+              batch: batchIndex,
+              totalBatches,
+            },
+          });
         }
       }
 
