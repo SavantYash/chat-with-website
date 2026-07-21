@@ -1,4 +1,4 @@
-import { WebPage, CrawlerConfig } from "../../types";
+import { WebPage, CrawlerConfig, IndexingProgressEvent } from "../../types";
 import { Crawler } from "./index";
 import { UrlNormalizer } from "./normalizer";
 import { HtmlParser } from "./parser";
@@ -52,9 +52,16 @@ export class WebsiteCrawler implements Crawler {
    * 
    * @param baseUrl Starting entrypoint URL of the website.
    * @param maxPagesOverride Optional parameter to override the configured max pages limit.
+   * @param signal Optional AbortSignal for cancellation.
+   * @param onProgress Optional progress callback.
    * @returns List of crawled WebPage data models containing raw HTML.
    */
-  async crawl(baseUrl: string, maxPagesOverride?: number): Promise<WebPage[]> {
+  async crawl(
+    baseUrl: string,
+    maxPagesOverride?: number,
+    signal?: AbortSignal,
+    onProgress?: (event: IndexingProgressEvent) => void
+  ): Promise<WebPage[]> {
     const maxPages = maxPagesOverride ?? this.config.maxPages;
     const normalizedStartUrl = this.normalizer.normalize(baseUrl);
 
@@ -81,6 +88,11 @@ export class WebsiteCrawler implements Crawler {
     ];
 
     while (queue.length > 0 && crawledPages.length < maxPages) {
+      if (signal?.aborted) {
+        console.log("[WebsiteCrawler] Crawl aborted by AbortSignal.");
+        throw new DOMException("Indexing aborted by user.", "AbortError");
+      }
+
       const currentItem = queue.shift();
       if (!currentItem) {
         continue;
@@ -139,6 +151,17 @@ export class WebsiteCrawler implements Crawler {
         url: currentUrl,
         title,
         html,
+      });
+
+      onProgress?.({
+        stage: "crawl",
+        message: `Crawled page ${crawledPages.length}/${maxPages}\n${currentUrl}`,
+        details: {
+          url: currentUrl,
+          crawledPages: crawledPages.length,
+          maxPages,
+          action: "crawl"
+        },
       });
 
       // Avoid queueing child pages if we've reached the maximum crawl depth

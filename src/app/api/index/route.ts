@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createIndexingPipeline } from "@/lib/chat";
+import { MAX_PAGES, DEFAULT_MAX_PAGES } from "@/lib/constants";
 
 /**
  * POST /api/index
@@ -26,7 +27,7 @@ export async function POST(request: Request) {
 
     const { url, maxPages } = body as { url?: string; maxPages?: number };
 
-    // 2. Validations
+    // 2. Validations & hard clamping to 1-15 pages
     if (!url || typeof url !== "string" || !url.trim()) {
       console.warn(`[API /api/index] ❌ Validation failed: 'url' is missing or blank.`);
       return NextResponse.json(
@@ -35,14 +36,8 @@ export async function POST(request: Request) {
       );
     }
 
-    const limitPages = maxPages !== undefined ? Number(maxPages) : 10;
-    if (isNaN(limitPages) || limitPages <= 0) {
-      console.warn(`[API /api/index] ❌ Validation failed: 'maxPages' must be a positive number.`);
-      return NextResponse.json(
-        { error: "Invalid parameter: 'maxPages' must be a positive number." },
-        { status: 400 }
-      );
-    }
+    const rawPages = maxPages !== undefined ? Number(maxPages) : DEFAULT_MAX_PAGES;
+    const limitPages = Math.min(Math.max(1, isNaN(rawPages) ? DEFAULT_MAX_PAGES : Math.floor(rawPages)), MAX_PAGES);
 
     // 3. Resolve dependencies using the factory
     console.log(`[API /api/index] Instantiating dependencies via IndexingPipeline factory...`);
@@ -62,6 +57,7 @@ export async function POST(request: Request) {
             maxPages: limitPages,
             maxDepth: 3,
             clearExisting: true, // Resets database tables for a clean crawl
+            signal: request.signal,
             onProgress: (event) => {
               sendEvent({
                 type: "progress",
@@ -72,8 +68,18 @@ export async function POST(request: Request) {
             },
           });
 
+          if (summary.pagesVisited >= limitPages || summary.pagesIndexed >= limitPages) {
+            sendEvent({
+              type: "progress",
+              message: `Page limit reached (${limitPages} pages). Indexing completed.`,
+              stage: "complete"
+            });
+          }
+
           const elapsed = performance.now() - requestStartTime;
           console.log(`[API /api/index] Completed successfully in ${elapsed.toFixed(1)}ms. Total pages: ${summary.pagesIndexed}, chunks: ${summary.chunksStored}.`);
+
+          const totalBatches = Math.ceil((summary.chunksCreated || 0) / 50) || 1;
 
           sendEvent({
             type: "complete",
@@ -81,19 +87,36 @@ export async function POST(request: Request) {
             meta: {
               url,
               maxPages: limitPages,
-              totalPages: summary.pagesIndexed,
-              totalChunks: summary.chunksStored,
+              pagesVisited: summary.pagesVisited,
+              pagesIndexed: summary.pagesIndexed,
+              pagesCleaned: summary.pagesIndexed,
+              chunksCreated: summary.chunksCreated,
+              embeddingBatches: totalBatches,
+              chunksStored: summary.chunksStored,
               durationMs: elapsed
             }
           });
           controller.close();
         } catch (error: any) {
           const elapsed = performance.now() - requestStartTime;
-          console.error(`[API /api/index] ❌ Indexing failure after ${elapsed.toFixed(1)}ms: ${error.message}`);
-          sendEvent({
-            type: "error",
-            error: error.message || "An unexpected error occurred during indexing."
-          });
+          if (error.name === "AbortError" || request.signal.aborted) {
+            console.log(`[API /api/index] 🛑 Request aborted after ${elapsed.toFixed(1)}ms.`);
+            sendEvent({
+              type: "progress",
+              message: "[Cancelled] Indexing run was cancelled by user.",
+              stage: "cancel"
+            });
+            sendEvent({
+              type: "error",
+              error: "Indexing run was cancelled by user."
+            });
+          } else {
+            console.error(`[API /api/index] ❌ Indexing failure after ${elapsed.toFixed(1)}ms: ${error.message}`);
+            sendEvent({
+              type: "error",
+              error: error.message || "An unexpected error occurred during indexing."
+            });
+          }
           controller.close();
         }
       }

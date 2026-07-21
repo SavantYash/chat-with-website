@@ -109,7 +109,7 @@ export class IndexingPipeline {
     console.log(`[IndexingPipeline] Crawl starting on: ${startUrl}...`);
 
     const crawlStart = performance.now();
-    const pages = await this.crawler.crawl(startUrl, maxPages);
+    const pages = await this.crawler.crawl(startUrl, maxPages, signal, onProgress);
     const crawlDuration = performance.now() - crawlStart;
     
     console.log(`[IndexingPipeline] Crawl finished. Explored ${pages.length} URLs in ${crawlDuration.toFixed(1)}ms.`);
@@ -139,17 +139,18 @@ export class IndexingPipeline {
       const extractStart = performance.now();
       let processedPage;
       try {
-        onProgress?.({
-          stage: "extract",
-          message: `Cleaning content for: ${page.url}`,
-          details: { url: page.url },
-        });
         processedPage = await this.extractor.extract(page);
         extractionDuration += performance.now() - extractStart;
 
         if (!processedPage) {
           throw new Error("Page content below threshold limit (<100 characters).");
         }
+
+        onProgress?.({
+          stage: "extract",
+          message: `Cleaned content\n${page.url}`,
+          details: { url: page.url, action: "clean" },
+        });
       } catch (error: any) {
         skippedPages++;
         pageResults.push({
@@ -167,17 +168,23 @@ export class IndexingPipeline {
       const chunkingStart = performance.now();
       let chunksList: DocumentChunk[] = [];
       try {
-        onProgress?.({
-          stage: "chunk",
-          message: `Chunking content for: ${page.url}`,
-          details: { url: page.url },
-        });
         chunksList = activeChunker.chunk(processedPage);
         chunkingDuration += performance.now() - chunkingStart;
 
         if (chunksList.length === 0) {
           throw new Error("Zero semantic chunks generated from page.");
         }
+
+        onProgress?.({
+          stage: "chunk",
+          message: `Created ${chunksList.length} chunks`,
+          details: {
+            url: page.url,
+            action: "chunk",
+            chunksCount: chunksList.length,
+            totalChunks: allChunks.length + chunksList.length,
+          },
+        });
       } catch (error: any) {
         skippedPages++;
         pageResults.push({
@@ -226,8 +233,8 @@ export class IndexingPipeline {
       // 5A. Generate Batch Embeddings
       onProgress?.({
         stage: "embed",
-        message: `Embedding batch ${batchIndex}/${totalBatches}...`,
-        details: { batch: batchIndex, totalBatches, itemsCount: chunkBatch.length },
+        message: `Embedding batch ${batchIndex}/${totalBatches}`,
+        details: { action: "embed", batch: batchIndex, totalBatches, itemsCount: chunkBatch.length, totalChunks: totalChunksCreated },
       });
 
       const batchTexts = chunkBatch.map((c) => c.content);
@@ -335,18 +342,24 @@ export class IndexingPipeline {
         embedding: embeddingsList[idx],
       }));
 
-      // 5B. Write Batch to Vector Store
-      onProgress?.({
-        stage: "store",
-        message: `Storing batch ${batchIndex}/${totalBatches} in ${this.vectorStore.constructor.name}...`,
-        details: { batch: batchIndex, totalBatches, itemsCount: embeddedChunks.length },
-      });
-
       const storeStart = performance.now();
       try {
         await this.vectorStore.upsert(embeddedChunks);
         storageDuration += performance.now() - storeStart;
         chunksStored += embeddedChunks.length;
+
+        onProgress?.({
+          stage: "store",
+          message: `Stored ${embeddedChunks.length} vectors`,
+          details: {
+            action: "store",
+            batch: batchIndex,
+            totalBatches,
+            storedChunks: chunksStored,
+            totalChunks: totalChunksCreated,
+          },
+        });
+
         console.log(`[IndexingPipeline] Batch [${batchIndex}/${totalBatches}] persisted in ${(performance.now() - storeStart).toFixed(1)}ms.`);
       } catch (error: any) {
         console.error(`[IndexingPipeline] ❌ Vector storage write failed on Batch ${batchIndex}: ${error.message}`);

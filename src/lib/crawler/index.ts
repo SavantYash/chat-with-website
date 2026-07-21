@@ -1,4 +1,4 @@
-import { WebPage } from "../../types";
+import { WebPage, IndexingProgressEvent } from "../../types";
 
 /**
  * Interface defining the Web Crawler component.
@@ -11,9 +11,16 @@ export interface Crawler {
    * 
    * @param baseUrl Starting URL
    * @param maxPages Maximum number of pages to crawl
+   * @param signal Optional AbortSignal for cancellation
+   * @param onProgress Optional progress callback
    * @returns Array of crawled pages with content
    */
-  crawl(baseUrl: string, maxPages?: number): Promise<WebPage[]>;
+  crawl(
+    baseUrl: string,
+    maxPages?: number,
+    signal?: AbortSignal,
+    onProgress?: (event: IndexingProgressEvent) => void
+  ): Promise<WebPage[]>;
 }
 
 export * from "./crawler";
