@@ -34,8 +34,99 @@ export interface CrawlerConfig {
   userAgent?: string;
 }
 
+export type SourceType = "website" | "file";
+
 /**
- * Represents a semantic chunk of a crawled web page.
+ * Metadata associated with a normalized document or chunk.
+ */
+export interface SourceMetadata {
+  /** Type of knowledge source */
+  sourceType: SourceType;
+
+  /** Human-readable name of the source (e.g. website title, file name) */
+  sourceName: string;
+
+  /** Source URL if originating from a web page */
+  sourceUrl?: string;
+
+  /** Original file name if originating from a file upload */
+  fileName?: string;
+
+  /** Format or extension of the file (pdf, docx, md, txt) */
+  fileType?: string;
+
+  /** 1-based page number for paginated documents (e.g. PDF) */
+  pageNumber?: number;
+
+  /** Total pages in document if available */
+  totalPages?: number;
+
+  /** File size in bytes if available */
+  fileSize?: number;
+
+  /** Custom metadata attributes */
+  custom?: Record<string, unknown>;
+}
+
+/**
+ * Common representation of a document extracted from any knowledge source.
+ * This is the common currency between KnowledgeSources and the IndexingPipeline.
+ */
+export interface NormalizedDocument {
+  /** Unique identifier for the document */
+  id: string;
+
+  /** Title of the document or webpage */
+  title: string;
+
+  /** Clean, structured textual content ready for chunking */
+  content: string;
+
+  /** Granular metadata about the origin of the document */
+  metadata: SourceMetadata;
+}
+
+/**
+ * Interface for format-specific document extractors (PDF, DOCX, Markdown, Text).
+ */
+export interface DocumentExtractor {
+  /**
+   * Checks whether this extractor supports the given file type or MIME type.
+   */
+  supports(fileType: string, mimeType?: string): boolean;
+
+  /**
+   * Extracts clean, structured NormalizedDocument(s) from a raw file buffer.
+   */
+  extract(
+    fileBuffer: Buffer,
+    fileName: string,
+    options?: Record<string, unknown>
+  ): Promise<NormalizedDocument[]>;
+}
+
+/**
+ * Interface defining a KnowledgeSource (Website, File, or future integrations).
+ * Acts as the boundary abstraction for all ingestion mechanisms.
+ */
+export interface KnowledgeSource {
+  /** Identifier of the source type */
+  readonly sourceType: SourceType;
+
+  /** Display name of the source */
+  readonly sourceName: string;
+
+  /**
+   * Ingests, crawls, or parses content from the source and yields NormalizedDocuments.
+   */
+  ingest(
+    onProgress?: (event: IndexingProgressEvent) => void,
+    signal?: AbortSignal
+  ): Promise<NormalizedDocument[]>;
+}
+
+/**
+ * Represents a semantic chunk of an extracted document.
  * This is the core model stored in the vector database and retrieved during chat queries.
  */
 export interface DocumentChunk {
@@ -46,12 +137,12 @@ export interface DocumentChunk {
   id: string;
 
   /**
-   * The source URL of the web page from which this chunk was extracted.
+   * The source URL of the document/chunk (or filename identifier for files).
    */
   url: string;
 
   /**
-   * The title of the source web page.
+   * The title of the source document or webpage.
    */
   title: string;
 
@@ -62,7 +153,6 @@ export interface DocumentChunk {
 
   /**
    * The zero-based index of this chunk within the original document.
-   * Useful for reconstructing adjacent context (e.g. sliding window).
    */
   chunkIndex: number;
 
@@ -82,14 +172,47 @@ export interface DocumentChunk {
   endOffset: number;
 
   /**
+   * Knowledge source type (website | file).
+   */
+  sourceType?: SourceType;
+
+  /**
+   * Source name (e.g. website title or document name).
+   */
+  sourceName?: string;
+
+  /**
+   * Source URL for websites.
+   */
+  sourceUrl?: string;
+
+  /**
+   * File name for documents.
+   */
+  fileName?: string;
+
+  /**
+   * File type for documents (pdf, docx, md, txt).
+   */
+  fileType?: string;
+
+  /**
+   * Page number for paginated documents (e.g., PDF).
+   */
+  pageNumber?: number;
+
+  /**
+   * Additional source metadata.
+   */
+  metadata?: SourceMetadata;
+
+  /**
    * The high-dimensional dense vector representing the semantic content of the chunk.
-   * Optional because chunking occurs prior to embedding generation.
    */
   embedding?: number[];
 
   /**
-   * Optional similarity score (e.g., L2 distance, cosine similarity)
-   * populated only when returned from a search query.
+   * Optional similarity score populated when returned from a search query.
    */
   score?: number;
 }

@@ -72,7 +72,12 @@ export class ChatService {
     // 4. Map citations in exact retriever order
     const sources: ChatSource[] = chunks.map((chunk) => ({
       title: chunk.title,
-      url: chunk.url,
+      url: chunk.sourceUrl || chunk.fileName || chunk.url,
+      sourceType: chunk.sourceType || (chunk.url.startsWith("http") ? "website" : "file"),
+      sourceName: chunk.sourceName || chunk.title,
+      fileName: chunk.fileName,
+      fileType: chunk.fileType,
+      pageNumber: chunk.pageNumber,
       chunkNumber: chunk.chunkIndex + 1,
       totalChunks: chunk.totalChunks,
       distance: chunk.score,

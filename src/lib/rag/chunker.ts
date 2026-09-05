@@ -1,8 +1,8 @@
 import { v4 as uuidv4 } from "uuid";
-import { ProcessedPage, DocumentChunk } from "../../types";
+import { ProcessedPage, NormalizedDocument, DocumentChunk, SourceMetadata } from "../../types";
 
 /**
- * DocumentChunker segments cleaned page content (ProcessedPage)
+ * DocumentChunker segments cleaned content (NormalizedDocument or ProcessedPage)
  * into smaller, overlapping semantic chunks (DocumentChunks) suitable for embeddings.
  * 
  * Why this class exists:
@@ -33,13 +33,30 @@ export class DocumentChunker {
   }
 
   /**
-   * Transforms a ProcessedPage into an array of semantic DocumentChunks.
+   * Transforms a NormalizedDocument or ProcessedPage into an array of semantic DocumentChunks.
    * 
-   * @param page Cleaned ProcessedPage metadata and text content.
-   * @returns Array of DocumentChunk objects.
+   * @param doc Cleaned document or page metadata and text content.
+   * @returns Array of DocumentChunk objects with source metadata.
    */
-  chunk(page: ProcessedPage): DocumentChunk[] {
-    const { url, title, content } = page;
+  chunk(doc: NormalizedDocument | ProcessedPage): DocumentChunk[] {
+    const title = doc.title;
+    const content = doc.content;
+    
+    // Extract metadata depending on input type
+    let url = "";
+    let sourceMeta: SourceMetadata | undefined = undefined;
+
+    if ("metadata" in doc && doc.metadata) {
+      sourceMeta = doc.metadata;
+      url = doc.metadata.sourceUrl || doc.metadata.fileName || title;
+    } else if ("url" in doc) {
+      url = doc.url;
+      sourceMeta = {
+        sourceType: "website",
+        sourceName: title,
+        sourceUrl: doc.url,
+      };
+    }
     
     if (!content || !content.trim()) {
       return [];
@@ -104,6 +121,13 @@ export class DocumentChunker {
       totalChunks,
       startOffset: c.start,
       endOffset: c.end,
+      sourceType: sourceMeta?.sourceType,
+      sourceName: sourceMeta?.sourceName,
+      sourceUrl: sourceMeta?.sourceUrl,
+      fileName: sourceMeta?.fileName,
+      fileType: sourceMeta?.fileType,
+      pageNumber: sourceMeta?.pageNumber,
+      metadata: sourceMeta,
     }));
 
     return finalChunks;

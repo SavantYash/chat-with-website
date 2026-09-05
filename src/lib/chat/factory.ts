@@ -4,36 +4,104 @@ import { PromptBuilder } from "./prompt-builder";
 import { GeminiChatProvider } from "../llm/gemini-chat";
 import { GeminiEmbeddingProvider } from "../llm/gemini-embedding";
 import { PgVectorStore } from "../db/pgvector-store";
+import { LanceDBStore } from "../db/lancedb-store";
+import { MockVectorStore } from "../db/mock-store";
 import { IndexingPipeline } from "../rag/indexing-pipeline";
 import { WebsiteCrawler } from "../crawler/crawler";
 import { HtmlExtractor } from "../rag/html-extractor";
 import { DocumentChunker } from "../rag/chunker";
+import { WebsiteKnowledgeSource, WebsiteSourceOptions } from "../sources/website-source";
+import { FileKnowledgeSource, FileInput } from "../sources/file-source";
+import { ExtractorRegistry, defaultExtractorRegistry } from "../extractors";
+import { VectorStore } from "../../types";
 
-function createVectorStore() {
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+/**
+ * Thread-safe cached initialization promise for the singleton VectorStore instance.
+ * Ensures concurrent requests in Next.js share the exact same in-flight or resolved store.
+ */
+let vectorStorePromise: Promise<VectorStore> | null = null;
 
-  if (!supabaseUrl) {
-    throw new Error("[VectorStoreFactory] SUPABASE_URL environment variable is not defined.");
+/**
+ * Creates a VectorStore instance based on the VECTOR_DB environment variable.
+ * Supported values:
+ * - "lancedb" (or default): Local embedded LanceDB (zero-config, high-performance)
+ * - "supabase" (or "pgvector"): Remote Supabase PostgreSQL pgvector
+ * - "mock": In-memory store for unit tests
+ */
+export function createVectorStore(): VectorStore {
+  const vectorDbEnv = (process.env.VECTOR_DB || "lancedb").trim().toLowerCase();
+
+  // 1. Explicit Supabase selection
+  if (vectorDbEnv === "supabase" || vectorDbEnv === "pgvector") {
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (!supabaseUrl) {
+      throw new Error(
+        "[VectorStoreFactory] VECTOR_DB=supabase requires SUPABASE_URL environment variable to be defined."
+      );
+    }
+    if (!serviceRoleKey) {
+      throw new Error(
+        "[VectorStoreFactory] VECTOR_DB=supabase requires SUPABASE_SERVICE_ROLE_KEY environment variable to be defined."
+      );
+    }
+
+    console.log(`[VectorStoreFactory] Using Supabase pgvector store at '${supabaseUrl}'`);
+    return new PgVectorStore({
+      uri: supabaseUrl,
+      serviceRoleKey,
+      namespace: process.env.VECTOR_DB_TABLE || "web_chunks",
+      embeddingDimension: 768,
+    });
   }
-  if (!serviceRoleKey) {
-    throw new Error("[VectorStoreFactory] SUPABASE_SERVICE_ROLE_KEY environment variable is not defined.");
+
+  // 2. Mock store selection
+  if (vectorDbEnv === "mock") {
+    console.log(`[VectorStoreFactory] Using in-memory MockVectorStore.`);
+    return new MockVectorStore({
+      uri: "mock://memory",
+      embeddingDimension: 768,
+    });
   }
 
-  return new PgVectorStore({
-    uri: supabaseUrl,
-    serviceRoleKey,
-    namespace: "web_chunks",
+  // 3. Default: Local LanceDB
+  const lanceDbUri = process.env.LANCEDB_URI || "./data/lancedb";
+  console.log(`[VectorStoreFactory] Using local LanceDB vector store at '${lanceDbUri}'`);
+  return new LanceDBStore({
+    uri: lanceDbUri,
+    namespace: process.env.VECTOR_DB_TABLE || "web_chunks",
     embeddingDimension: 768,
   });
 }
 
 /**
+ * Returns the initialized singleton VectorStore, ensuring thread-safe one-time initialization.
+ */
+export async function getOrInitVectorStore(): Promise<VectorStore> {
+  if (!vectorStorePromise) {
+    vectorStorePromise = (async () => {
+      const store = createVectorStore();
+      await store.initialize();
+      return store;
+    })().catch((error) => {
+      // Reset promise on initialization failure to allow subsequent retries
+      vectorStorePromise = null;
+      throw error;
+    });
+  }
+  return vectorStorePromise;
+}
+
+/**
+ * Reset helper for testing environments.
+ */
+export function resetVectorStoreCache(): void {
+  vectorStorePromise = null;
+}
+
+/**
  * Creates and initializes a ChatService instance by resolving all DI dependencies.
- * Ensures the exact same database path and table defaults are reused to synchronize
- * with the indexing pipeline.
- * 
- * @returns A promise resolving to the initialized ChatService.
  */
 export async function createChatService(): Promise<ChatService> {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -43,18 +111,13 @@ export async function createChatService(): Promise<ChatService> {
     );
   }
 
-  // 1. Ingestion/Retrieval matching configurations
   const embeddingProvider = new GeminiEmbeddingProvider({
     apiKey,
     normalizeVectors: true,
   });
 
-  const vectorStore = createVectorStore();
+  const vectorStore = await getOrInitVectorStore();
 
-  // Pre-initialize connection schema mappings
-  await vectorStore.initialize();
-
-  // 2. Chat modules
   const retriever = new Retriever(embeddingProvider, vectorStore);
   const promptBuilder = new PromptBuilder();
   const chatProvider = new GeminiChatProvider({
@@ -68,9 +131,6 @@ export async function createChatService(): Promise<ChatService> {
 
 /**
  * Creates and initializes an IndexingPipeline instance by resolving all DI dependencies.
- * Reuses the same database configuration as the chat service to ensure consistency.
- * 
- * @returns A promise resolving to the initialized IndexingPipeline.
  */
 export async function createIndexingPipeline(): Promise<IndexingPipeline> {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -88,9 +148,7 @@ export async function createIndexingPipeline(): Promise<IndexingPipeline> {
     normalizeVectors: true,
   });
 
-  const vectorStore = createVectorStore();
-
-  await vectorStore.initialize();
+  const vectorStore = await getOrInitVectorStore();
 
   return new IndexingPipeline(
     crawler,
@@ -99,4 +157,15 @@ export async function createIndexingPipeline(): Promise<IndexingPipeline> {
     embeddingProvider,
     vectorStore
   );
+}
+
+export function createWebsiteSource(options: WebsiteSourceOptions): WebsiteKnowledgeSource {
+  return new WebsiteKnowledgeSource(options);
+}
+
+export function createFileSource(
+  files: FileInput[],
+  registry?: ExtractorRegistry
+): FileKnowledgeSource {
+  return new FileKnowledgeSource({ files, registry: registry ?? defaultExtractorRegistry });
 }

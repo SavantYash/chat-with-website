@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createIndexingPipeline } from "@/lib/chat";
 import { MAX_PAGES, DEFAULT_MAX_PAGES } from "@/lib/constants";
+import { IndexingProgressEvent } from "@/types";
 
 /**
  * POST /api/index
@@ -58,7 +59,7 @@ export async function POST(request: Request) {
             maxDepth: 3,
             clearExisting: true, // Resets database tables for a clean crawl
             signal: request.signal,
-            onProgress: (event) => {
+            onProgress: (event: IndexingProgressEvent) => {
               const isRateLimit = event.details?.action === "rate_limit" || event.details?.action === "rate_limit_tick";
               sendEvent({
                 type: isRateLimit ? "rate_limit" : "progress",

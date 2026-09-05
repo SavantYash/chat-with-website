@@ -24,12 +24,12 @@ export class PromptBuilder {
     const systemInstructions = [
       "## System Instructions",
       "",
-      "You are an AI assistant that answers questions ONLY using the provided website context.",
+      "You are an AI assistant that answers questions ONLY using the provided knowledge base context.",
       "",
       "Rules:",
       "- Do not use outside knowledge.",
       "- If the answer is not contained in the context, reply exactly:",
-      "\"I couldn't find that information in the indexed website.\"",
+      "\"I couldn't find that information in the indexed knowledge base.\"",
       "- Do not fabricate or speculate on any information.",
       "- Cite the relevant source numbers (e.g., [Source 1], [Source 2]) when answering."
     ].join("\n");
@@ -46,15 +46,33 @@ export class PromptBuilder {
     } else {
       contextContent = chunks
         .map((chunk, idx) => {
-          return [
+          const sourceLines = [
             `[Source ${idx + 1}]`,
             `Title: ${chunk.title}`,
-            `URL: ${chunk.url}`,
+          ];
+
+          if (chunk.sourceUrl) {
+            sourceLines.push(`URL: ${chunk.sourceUrl}`);
+          } else if (chunk.url) {
+            sourceLines.push(`Source: ${chunk.url}`);
+          }
+
+          if (chunk.fileName) {
+            sourceLines.push(`File: ${chunk.fileName}`);
+          }
+
+          if (chunk.pageNumber) {
+            sourceLines.push(`Page: ${chunk.pageNumber}`);
+          }
+
+          sourceLines.push(
             `Chunk Number: ${chunk.chunkIndex + 1} of ${chunk.totalChunks}`,
             "",
             "Content:",
             chunk.content
-          ].join("\n");
+          );
+
+          return sourceLines.join("\n");
         })
         .join("\n\n------------------------\n\n");
     }
