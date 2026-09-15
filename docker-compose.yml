@@ -1,0 +1,23 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chat-with-website
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      # Environment variables can go here, or you can use an env_file
+    env_file:
+      - .env.local
+    
+    # If you have an external network for nginx, uncomment the below lines:
+    # networks:
+    #   - nginx_network
+
+# If using an external docker network to communicate with nginx reverse proxy
+# networks:
+#   nginx_network:
+#     external: true
