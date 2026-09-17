@@ -1,8 +1,7 @@
-FROM node:18-alpine AS base
+FROM node:22-alpine AS base
 
-# Install dependencies only when needed
-FROM base AS deps
-# Check https://github.com/nodejs/docker-node/tree/b4117f9333da4138b03a546ec926ef50a31506c3#nodealpine to understand why libc6-compat might be needed.
+# Rebuild the source code only when needed
+FROM base AS builder
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
@@ -10,10 +9,7 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci
 
-# Rebuild the source code only when needed
-FROM base AS builder
-WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
+# Copy source and build
 COPY . .
 
 # Next.js collects completely anonymous telemetry data about general usage.
@@ -41,6 +37,9 @@ RUN chown nextjs:nodejs .next
 # https://nextjs.org/docs/advanced-features/output-file-tracing
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+# Manually copy @napi-rs because Next.js standalone tracing misses dynamically loaded native dependencies
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@napi-rs ./node_modules/@napi-rs
 
 USER nextjs
 

@@ -304,14 +304,36 @@ export default function Home() {
 
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const filesArray = Array.from(e.dataTransfer.files);
-      setSelectedFiles(filesArray);
+      const validFiles = filesArray.filter(f => {
+        if (f.size > 25 * 1024 * 1024) {
+          addToast(`File '${f.name}' exceeds maximum allowed size of 25MB.`, "error");
+          return false;
+        }
+        return true;
+      });
+      if (validFiles.length > 0) {
+        setSelectedFiles(validFiles);
+      }
     }
   };
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const filesArray = Array.from(e.target.files);
-      setSelectedFiles(filesArray);
+      const validFiles = filesArray.filter(f => {
+        if (f.size > 25 * 1024 * 1024) {
+          addToast(`File '${f.name}' exceeds maximum allowed size of 25MB.`, "error");
+          return false;
+        }
+        return true;
+      });
+      if (validFiles.length > 0) {
+        setSelectedFiles(validFiles);
+      }
+    }
+    // Reset input so the user can select the same file again if they want
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
     }
   };
 
